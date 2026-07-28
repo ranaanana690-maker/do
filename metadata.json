@@ -1,0 +1,6 @@
+{
+  "name": "مديرية الخدمات الجامعية معسكر",
+  "description": "منصة إلكترونية لاستقبال ومعالجة طلبات الحالات الخاصة (متأخرين، مرفوضين، تحويل إقامة).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
