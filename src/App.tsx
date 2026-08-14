@@ -278,16 +278,17 @@ export default function App() {
           console.warn('Direct R2 presigned upload notice, trying method B:', directErr);
         }
 
-        // Method B: Server Endpoint Upload
+        // Method B: Server Endpoint Upload (Binary payload compatible with Vercel serverless & Express)
         if (!uploadSucceeded) {
           try {
-            const uploadFormData = new FormData();
-            uploadFormData.append('file', selectedFile);
-            uploadFormData.append('registrationNumber', formData.registrationNumber.trim());
-
             const r2Res = await fetch('/api/r2/upload', {
               method: 'POST',
-              body: uploadFormData,
+              headers: {
+                'Content-Type': selectedFile.type || 'application/pdf',
+                'x-file-name': encodeURIComponent(selectedFile.name),
+                'x-registration-number': encodeURIComponent(formData.registrationNumber.trim())
+              },
+              body: selectedFile
             });
 
             if (r2Res.ok) {
@@ -295,6 +296,10 @@ export default function App() {
               pdfFilePath = r2Data.key;
               pdfFileName = r2Data.fileName || selectedFile.name;
               uploadSucceeded = true;
+              console.log('[R2 Server Upload Success]:', pdfFilePath);
+            } else {
+              const errText = await r2Res.text();
+              console.warn('[R2 Server Upload Error Response]:', r2Res.status, errText);
             }
           } catch (r2Err) {
             console.warn('R2 proxy upload notice, trying Supabase Storage fallback:', r2Err);

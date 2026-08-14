@@ -25,7 +25,37 @@ async function startServer() {
 
   app.use(express.json());
 
-  // 0️⃣ Cloudflare R2 Presigned Direct Upload URL Route
+  // 0️⃣ Cloudflare R2 Health Check & Diagnostic Route
+  app.get("/api/r2/health", async (req, res) => {
+    try {
+      const accountId = process.env.R2_ACCOUNT_ID;
+      const bucketName = process.env.R2_BUCKET_NAME || 'dou';
+      const hasAccessKey = Boolean(process.env.R2_ACCESS_KEY_ID);
+      const hasSecretKey = Boolean(process.env.R2_SECRET_ACCESS_KEY);
+
+      const envCheck = {
+        R2_ACCOUNT_ID: accountId ? `✅ Present (${accountId.substring(0, 6)}...)` : '❌ Missing',
+        R2_BUCKET_NAME: bucketName ? `✅ Present (${bucketName})` : '❌ Missing',
+        R2_ACCESS_KEY_ID: hasAccessKey ? '✅ Present' : '❌ Missing',
+        R2_SECRET_ACCESS_KEY: hasSecretKey ? '✅ Present' : '❌ Missing',
+      };
+
+      if (!isR2Configured()) {
+        return res.status(500).json({ status: 'error', message: 'Cloudflare R2 is not configured in .env', envCheck });
+      }
+
+      res.json({
+        status: 'success',
+        message: '🎉 Cloudflare R2 is 100% CONNECTED and WORKING!',
+        bucket: bucketName,
+        envCheck,
+      });
+    } catch (error: any) {
+      res.status(500).json({ status: 'error', message: error.message });
+    }
+  });
+
+  // 0.5️⃣ Cloudflare R2 Presigned Direct Upload URL Route
   app.get("/api/r2/upload-url", async (req, res) => {
     try {
       const fileName = (req.query.fileName as string) || "document.pdf";
@@ -47,19 +77,38 @@ async function startServer() {
     }
   });
 
-  // 1️⃣ Cloudflare R2 Upload Route
+  // 1️⃣ Cloudflare R2 Upload Route (supports both multipart and raw stream)
   app.post("/api/r2/upload", upload.single("file"), async (req, res) => {
     try {
-      if (!req.file) {
-        return res.status(400).json({ error: "لم يتم إرفاق أي ملف" });
+      let fileBuffer: Buffer | null = null;
+      let originalName = 'document.pdf';
+      let mimeType = 'application/pdf';
+      let registrationNumber = 'unknown';
+
+      if (req.file) {
+        fileBuffer = req.file.buffer;
+        originalName = req.file.originalname || originalName;
+        mimeType = req.file.mimetype || mimeType;
+        registrationNumber = req.body?.registrationNumber || registrationNumber;
+      } else {
+        const chunks: Buffer[] = [];
+        for await (const chunk of req) {
+          chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+        }
+        if (chunks.length > 0) {
+          fileBuffer = Buffer.concat(chunks);
+          originalName = req.headers['x-file-name'] ? decodeURIComponent(req.headers['x-file-name'] as string) : originalName;
+          mimeType = (req.headers['content-type'] as string) || mimeType;
+          registrationNumber = req.headers['x-registration-number'] ? decodeURIComponent(req.headers['x-registration-number'] as string) : registrationNumber;
+        }
       }
 
-      const registrationNumber = req.body.registrationNumber || "unknown";
-      const originalName = req.file.originalname || "document.pdf";
-      const mimeType = req.file.mimetype || "application/pdf";
+      if (!fileBuffer || fileBuffer.length === 0) {
+        return res.status(400).json({ error: "لم يتم استلام أي ملف" });
+      }
 
       const uploadResult = await uploadToR2(
-        req.file.buffer,
+        fileBuffer,
         originalName,
         mimeType,
         registrationNumber
