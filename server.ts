@@ -5,6 +5,7 @@ import multer from "multer";
 import dotenv from "dotenv";
 import {
   uploadToR2,
+  generatePresignedUploadUrl,
   generatePresignedDownloadUrl,
   deleteFromR2,
   cleanupExpiredCompletedFiles,
@@ -23,6 +24,28 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json());
+
+  // 0️⃣ Cloudflare R2 Presigned Direct Upload URL Route
+  app.get("/api/r2/upload-url", async (req, res) => {
+    try {
+      const fileName = (req.query.fileName as string) || "document.pdf";
+      const mimeType = (req.query.mimeType as string) || "application/pdf";
+      const registrationNumber = (req.query.registrationNumber as string) || "unknown";
+
+      if (!isR2Configured()) {
+        return res.status(400).json({
+          error: "Cloudflare R2 غير مهيأ بالكامل في متغيرات البيئة (.env).",
+          unconfigured: true,
+        });
+      }
+
+      const result = await generatePresignedUploadUrl(fileName, mimeType, registrationNumber);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Presigned upload URL error:", error);
+      res.status(500).json({ error: error.message || "فشل توليد رابط الرفع المباشر" });
+    }
+  });
 
   // 1️⃣ Cloudflare R2 Upload Route
   app.post("/api/r2/upload", upload.single("file"), async (req, res) => {

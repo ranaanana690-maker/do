@@ -78,6 +78,40 @@ export async function uploadToR2(
 }
 
 /**
+ * Generates a temporary Presigned PUT URL allowing the client browser to upload directly to Cloudflare R2
+ */
+export async function generatePresignedUploadUrl(
+  originalFileName: string,
+  mimeType: string,
+  registrationNumber: string = 'unknown'
+): Promise<{ uploadUrl: string; key: string; fileName: string }> {
+  const sanitizedName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const uniquePrefix = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  const key = `housing-pdfs/${year}/${month}/${registrationNumber}_${uniquePrefix}_${sanitizedName}`;
+
+  if (!isR2Configured()) {
+    throw new Error('Cloudflare R2 is not configured. Please check environment variables in Vercel.');
+  }
+
+  const command = new PutObjectCommand({
+    Bucket: R2_BUCKET_NAME,
+    Key: key,
+    ContentType: mimeType || 'application/pdf',
+  });
+
+  const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 600 });
+
+  return {
+    uploadUrl,
+    key,
+    fileName: originalFileName,
+  };
+}
+
+/**
  * Generates a temporary Presigned Download URL for viewing or downloading the PDF (valid for 15 minutes by default)
  */
 export async function generatePresignedDownloadUrl(key: string, expiresInSeconds: number = 900): Promise<string> {
