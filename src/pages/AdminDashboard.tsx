@@ -28,6 +28,9 @@ interface HousingRequestRecord {
   pdf_file_path: string;
   pdf_file_name: string;
   status: string;
+  completed_at?: string | null;
+  file_deleted?: boolean;
+  file_deleted_at?: string | null;
 }
 
 export const AdminDashboard: React.FC = () => {
@@ -87,9 +90,16 @@ export const AdminDashboard: React.FC = () => {
     if (!recordId) return;
     setUpdatingId(recordId);
     try {
+      const updatePayload: Record<string, any> = { status: newStatus };
+      if (newStatus === 'مكتمل') {
+        updatePayload.completed_at = new Date().toISOString();
+      } else {
+        updatePayload.completed_at = null;
+      }
+
       const { error: updateErr } = await supabase
         .from('housing_requests')
-        .update({ status: newStatus })
+        .update(updatePayload)
         .eq('id', recordId);
 
       if (updateErr) throw updateErr;
@@ -100,9 +110,9 @@ export const AdminDashboard: React.FC = () => {
           setIsDetailsOpen(false);
         }
       } else {
-        setRequests(prev => (prev || []).map(r => r && r.id === recordId ? { ...r, status: newStatus } : r));
+        setRequests(prev => (prev || []).map(r => r && r.id === recordId ? { ...r, ...updatePayload } : r));
         if (selectedRequest?.id === recordId) {
-          setSelectedRequest(prev => prev ? { ...prev, status: newStatus } : null);
+          setSelectedRequest(prev => prev ? { ...prev, ...updatePayload } : null);
         }
       }
     } catch (err: any) {
@@ -114,12 +124,27 @@ export const AdminDashboard: React.FC = () => {
   };
 
   const handleDownloadPDF = async (record: HousingRequestRecord) => {
-    if (!record?.pdf_file_path) {
-      alert('لا توجد وثيقة مرفقة مع هذا الطلب.');
+    if (!record?.pdf_file_path || record?.file_deleted) {
+      alert('لا توجد وثيقة مرفقة مع هذا الطلب أو تم حذفها تلقائياً.');
       return;
     }
     setDownloadingId(record.id);
     try {
+      // 1. Try Cloudflare R2 Presigned URL first
+      try {
+        const r2Res = await fetch(`/api/r2/download-url?key=${encodeURIComponent(record.pdf_file_path)}`);
+        if (r2Res.ok) {
+          const r2Data = await r2Res.json();
+          if (r2Data.downloadUrl) {
+            window.open(r2Data.downloadUrl, '_blank');
+            return;
+          }
+        }
+      } catch (r2Err) {
+        console.warn('R2 download URL fetch notice, fallback to Supabase storage:', r2Err);
+      }
+
+      // 2. Fallback to Supabase Storage if uploaded previously via Supabase
       const { data, error: signedUrlErr } = await supabase.storage
         .from('housing_pdfs')
         .createSignedUrl(record.pdf_file_path, 60);

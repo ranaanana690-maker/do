@@ -27,6 +27,9 @@ interface HousingRequestRecord {
   pdf_file_path: string;
   pdf_file_name: string;
   status: string;
+  completed_at?: string | null;
+  file_deleted?: boolean;
+  file_deleted_at?: string | null;
 }
 
 export const AdminAnalytics: React.FC = () => {

@@ -2,7 +2,7 @@
 -- 📜 SUPABASE DATABASE & STORAGE SCHEMA SCRIPT
 -- ====================================================================
 -- المشروع: منصة دراسة طلبات الإيواء الجامعي - مديرية الخدمات الجامعية معسكر
--- هذا الملف يحتوي على إعداد الجداول وسياسات الأمان (RLS) وخزينة الملفات (Storage Bucket).
+-- هذا الملف يحتوي على إعداد الجداول وسياسات الأمان (RLS) وتحديثات Cloudflare R2 والحذف بعد 24 ساعة.
 -- قم بنسخ وتشغيل الكود التالي في Supabase SQL Editor.
 -- ====================================================================
 
@@ -22,10 +22,23 @@ CREATE TABLE IF NOT EXISTS public.housing_requests (
     transfer_reason TEXT,
     sibling_name TEXT,
     email TEXT NOT NULL,
-    pdf_file_path TEXT NOT NULL,
-    pdf_file_name TEXT NOT NULL,
-    status TEXT DEFAULT 'جديد'
+    pdf_file_path TEXT,
+    pdf_file_name TEXT,
+    status TEXT DEFAULT 'جديد',
+    -- أعمدة دورة حياة الملفات والتنظيف بعد 24 ساعة من الاكتمال:
+    completed_at TIMESTAMPTZ DEFAULT NULL,
+    file_deleted BOOLEAN DEFAULT FALSE,
+    file_deleted_at TIMESTAMPTZ DEFAULT NULL
 );
+
+-- إضافة الأعمدة إلى الجدول إن كان موجوداً مسبقاً (Migration)
+ALTER TABLE public.housing_requests ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ DEFAULT NULL;
+ALTER TABLE public.housing_requests ADD COLUMN IF NOT EXISTS file_deleted BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.housing_requests ADD COLUMN IF NOT EXISTS file_deleted_at TIMESTAMPTZ DEFAULT NULL;
+
+-- إنشاء فهارس لتحسين سرعة الاستعلامات والبحث وعمليات التنظيف
+CREATE INDEX IF NOT EXISTS idx_housing_requests_status ON public.housing_requests(status);
+CREATE INDEX IF NOT EXISTS idx_housing_requests_cleanup ON public.housing_requests(status, completed_at, file_deleted) WHERE status = 'مكتمل' AND file_deleted = FALSE;
 
 -- 2️⃣ تفعيل Row Level Security (RLS) لحماية جدول الطلبات
 ALTER TABLE public.housing_requests ENABLE ROW LEVEL SECURITY;
@@ -57,38 +70,7 @@ TO authenticated
 USING (auth.role() = 'authenticated')
 WITH CHECK (auth.role() = 'authenticated');
 
--- 3️⃣ إنشاء خزانة الملفات (Storage Bucket) مع تقييد الحجم ونوع الملفات (PDF فقط، 5MB أقصى حد)
-INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-VALUES (
-    'housing_pdfs',
-    'housing_pdfs',
-    false,
-    5242880, -- 5MB limit
-    ARRAY['application/pdf']
-)
-ON CONFLICT (id) DO UPDATE SET
-    file_size_limit = 5242880,
-    allowed_mime_types = ARRAY['application/pdf'];
-
--- 4️⃣ سياسات أمان خزانة الملفات (Storage Policies)
-DROP POLICY IF EXISTS "Allow public upload to housing_pdfs" ON storage.objects;
-DROP POLICY IF EXISTS "Allow admin to read housing_pdfs" ON storage.objects;
-
--- سياسة رفع الملفات للجمهور إلى الـ Bucket
-CREATE POLICY "Allow public upload to housing_pdfs"
-ON storage.objects 
-FOR INSERT 
-TO anon, authenticated
-WITH CHECK (bucket_id = 'housing_pdfs');
-
--- سياسة قراءة وتحميل الملفات للأدمن المسجل فقط (Select via Signed URLs)
-CREATE POLICY "Allow admin to read housing_pdfs"
-ON storage.objects 
-FOR SELECT 
-TO authenticated
-USING (bucket_id = 'housing_pdfs');
-
--- 5️⃣ جدول إعدادات النظام وقالب البريد الإلكتروني (system_settings)
+-- 3️⃣ جدول إعدادات النظام وقالب البريد الإلكتروني (system_settings)
 CREATE TABLE IF NOT EXISTS public.system_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,

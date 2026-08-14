@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   X, User, Mail, Calendar, FileText, Download, ExternalLink, 
   Sparkles, Home, Stethoscope, MapPin, Accessibility, Users, 
-  CheckCircle2, Clock, AlertCircle, ShieldCheck, Printer
+  CheckCircle2, Clock, AlertCircle, ShieldCheck, Printer, Trash2
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
@@ -25,6 +25,9 @@ export interface HousingRequestRecord {
   pdf_file_path: string;
   pdf_file_name: string;
   status: string;
+  completed_at?: string | null;
+  file_deleted?: boolean;
+  file_deleted_at?: string | null;
 }
 
 interface RequestDetailsModalProps {
@@ -46,12 +49,27 @@ export const RequestDetailsModal: React.FC<RequestDetailsModalProps> = ({
   if (!isOpen || !request) return null;
 
   const handleDownloadPDF = async () => {
-    if (!request.pdf_file_path) {
-      alert('لا توجد وثيقة مرفقة مع هذا الطلب.');
+    if (!request.pdf_file_path || request.file_deleted) {
+      alert('الوثيقة غير متوفرة أو تم حذفها تلقائياً بعد مرور 24 ساعة.');
       return;
     }
     setDownloading(true);
     try {
+      // 1. Try Cloudflare R2 Presigned URL first
+      try {
+        const r2Res = await fetch(`/api/r2/download-url?key=${encodeURIComponent(request.pdf_file_path)}`);
+        if (r2Res.ok) {
+          const r2Data = await r2Res.json();
+          if (r2Data.downloadUrl) {
+            window.open(r2Data.downloadUrl, '_blank');
+            return;
+          }
+        }
+      } catch (r2Err) {
+        console.warn('R2 download URL fetch notice, checking fallback:', r2Err);
+      }
+
+      // 2. Fallback to Supabase Storage if file was uploaded via Supabase
       const { data, error: signedUrlErr } = await supabase.storage
         .from('housing_pdfs')
         .createSignedUrl(request.pdf_file_path, 60);
@@ -64,7 +82,7 @@ export const RequestDetailsModal: React.FC<RequestDetailsModalProps> = ({
       }
     } catch (err: any) {
       console.error('Error generating signed URL:', err);
-      alert(`خطأ في استخراج الوثيقة: ${err.message || 'يرجى التحقق من صلاحيات Storage'}`);
+      alert(`خطأ في استخراج الوثيقة: ${err.message || 'يرجى التحقق من إعدادات التخزين'}`);
     } finally {
       setDownloading(false);
     }
@@ -77,6 +95,18 @@ export const RequestDetailsModal: React.FC<RequestDetailsModalProps> = ({
       setUpdatingStatus(false);
     }
   };
+
+  // Calculate remaining hours until 24h deletion
+  const getRemainingHours = () => {
+    if (!request.completed_at || request.file_deleted) return null;
+    const completedTime = new Date(request.completed_at).getTime();
+    const expiryTime = completedTime + 24 * 60 * 60 * 1000;
+    const remainingMs = expiryTime - Date.now();
+    if (remainingMs <= 0) return 0;
+    return Math.ceil(remainingMs / (60 * 60 * 1000));
+  };
+
+  const remainingHours = getRemainingHours();
 
   return (
     <AnimatePresence>
@@ -239,32 +269,45 @@ export const RequestDetailsModal: React.FC<RequestDetailsModalProps> = ({
                 </div>
               </div>
 
-              {/* PDF Document Download Box */}
+              {/* PDF Document & Lifecycle Status Box */}
               <div className="bg-emerald-50/70 p-4 sm:p-5 rounded-2xl border border-emerald-200/90 space-y-3 sm:col-span-2">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <FileText className="text-emerald-700 shrink-0" size={22} />
                     <div className="min-w-0">
-                      <h5 className="font-bold text-emerald-900 text-xs">الوثيقة المرفقة (PDF Justification Document)</h5>
+                      <h5 className="font-bold text-emerald-900 text-xs">وثيقة الطالب المرفقة (Cloudflare R2 PDF Storage)</h5>
                       <p className="text-[11px] text-emerald-700 font-mono truncate max-w-[220px] sm:max-w-xs">{request.pdf_file_name || 'وثيقة الطالب المرفقة.pdf'}</p>
                     </div>
                   </div>
 
-                  {request.pdf_file_path ? (
-                    <button
-                      onClick={handleDownloadPDF}
-                      disabled={downloading}
-                      className="w-full sm:w-auto flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs py-2.5 px-4 rounded-xl transition-all shadow-2xs active:scale-95 disabled:opacity-50 shrink-0"
-                    >
-                      {downloading ? (
-                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      ) : (
-                        <>
-                          <Download size={15} />
-                          تحميل وتنزيل PDF
-                        </>
+                  {request.file_deleted ? (
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-amber-800 bg-amber-100/90 border border-amber-300 px-3 py-1.5 rounded-xl">
+                      <ShieldCheck size={16} className="text-amber-700 shrink-0" />
+                      <span>تم حذف الوثيقة تلقائياً لمرور 24h على الأرشفة</span>
+                    </div>
+                  ) : request.pdf_file_path ? (
+                    <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2 w-full sm:w-auto">
+                      {remainingHours !== null && (
+                        <span className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg flex items-center gap-1">
+                          <Clock size={13} />
+                          متبقي {remainingHours} ساعة على الحذف التلقائي
+                        </span>
                       )}
-                    </button>
+                      <button
+                        onClick={handleDownloadPDF}
+                        disabled={downloading}
+                        className="w-full sm:w-auto flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs py-2.5 px-4 rounded-xl transition-all shadow-2xs active:scale-95 disabled:opacity-50 shrink-0 cursor-pointer"
+                      >
+                        {downloading ? (
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        ) : (
+                          <>
+                            <Download size={15} />
+                            تحميل وتنزيل PDF
+                          </>
+                        )}
+                      </button>
+                    </div>
                   ) : (
                     <span className="text-xs text-slate-400 font-medium">لا توجد وثيقة مرفقة</span>
                   )}
@@ -279,7 +322,7 @@ export const RequestDetailsModal: React.FC<RequestDetailsModalProps> = ({
           <div className="p-4 sm:p-6 border-t border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
             <button
               onClick={() => window.print()}
-              className="w-full sm:w-auto flex items-center justify-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 px-4 py-2.5 rounded-xl transition-all"
+              className="w-full sm:w-auto flex items-center justify-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 px-4 py-2.5 rounded-xl transition-all cursor-pointer"
             >
               <Printer size={15} />
               طباعة استمارة الطلب
@@ -287,7 +330,7 @@ export const RequestDetailsModal: React.FC<RequestDetailsModalProps> = ({
 
             <button
               onClick={onClose}
-              className="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-6 py-2.5 rounded-xl transition-all shadow-xs"
+              className="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-6 py-2.5 rounded-xl transition-all shadow-xs cursor-pointer"
             >
               إغلاق النافذة
             </button>

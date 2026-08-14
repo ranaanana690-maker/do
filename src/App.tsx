@@ -241,21 +241,41 @@ export default function App() {
       let pdfFilePath = '';
       let pdfFileName = '';
 
-      // 1. Upload PDF to Supabase Storage if file is attached
+      // 1. Upload PDF to Cloudflare R2 (with Supabase storage fallback)
       if (selectedFile) {
         pdfFileName = selectedFile.name;
-        // Generate unique UUID file path to prevent overwrite vulnerability
-        pdfFilePath = `${Date.now()}_${crypto.randomUUID()}_${formData.registrationNumber}.pdf`;
+        
+        try {
+          const uploadFormData = new FormData();
+          uploadFormData.append('file', selectedFile);
+          uploadFormData.append('registrationNumber', formData.registrationNumber.trim());
 
-        const { error: uploadError } = await supabase.storage
-          .from('housing_pdfs')
-          .upload(pdfFilePath, selectedFile, {
-            contentType: 'application/pdf',
-            upsert: false,
+          const r2Res = await fetch('/api/r2/upload', {
+            method: 'POST',
+            body: uploadFormData,
           });
 
-        if (uploadError) {
-          console.warn('Supabase storage upload warning:', uploadError);
+          if (r2Res.ok) {
+            const r2Data = await r2Res.json();
+            pdfFilePath = r2Data.key;
+            pdfFileName = r2Data.fileName || selectedFile.name;
+          } else {
+            throw new Error(`R2 upload responded with ${r2Res.status}`);
+          }
+        } catch (r2Err) {
+          console.warn('Cloudflare R2 upload fallback to Supabase Storage:', r2Err);
+          // Fallback to Supabase Storage if R2 endpoint is unreachable
+          pdfFilePath = `${Date.now()}_${crypto.randomUUID()}_${formData.registrationNumber}.pdf`;
+          const { error: uploadError } = await supabase.storage
+            .from('housing_pdfs')
+            .upload(pdfFilePath, selectedFile, {
+              contentType: 'application/pdf',
+              upsert: false,
+            });
+
+          if (uploadError) {
+            console.warn('Supabase storage upload warning:', uploadError);
+          }
         }
       }
 
