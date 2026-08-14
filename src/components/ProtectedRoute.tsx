@@ -1,22 +1,38 @@
 import React, { useEffect, useState } from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
+import { supabase, clearStaleSessionIfExpired } from '../lib/supabase';
 
 export const ProtectedRoute: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
   useEffect(() => {
-    // 1. Check active session on initial load
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setIsAuthenticated(!!session);
-    });
+    let isMounted = true;
 
-    // 2. Listen to authentication state changes (sign-in, sign-out, token refresh)
+    async function checkAuth() {
+      await clearStaleSessionIfExpired();
+      const { data: { session }, error } = await supabase.auth.getSession();
+      
+      if (error || !session) {
+        if (isMounted) setIsAuthenticated(false);
+        return;
+      }
+
+      if (isMounted) setIsAuthenticated(true);
+    }
+
+    checkAuth();
+
+    // Listen to authentication state changes (sign-in, sign-out, token refresh)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setIsAuthenticated(!!session);
+      if (isMounted) {
+        setIsAuthenticated(!!session);
+      }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Render smooth loading spinner during verification to prevent flickering or race conditions

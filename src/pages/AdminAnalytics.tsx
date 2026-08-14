@@ -6,7 +6,7 @@ import {
   Stethoscope, MapPin, Accessibility, FileText, Users, AlertTriangle, 
   CheckCircle2, Printer, Sparkles, Building2
 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabase, handleSupabaseError } from '../lib/supabase';
 import { AdminNavbar } from '../components/AdminNavbar';
 
 interface HousingRequestRecord {
@@ -51,7 +51,10 @@ export const AdminAnalytics: React.FC = () => {
       setRequests(data || []);
     } catch (err: any) {
       console.error('Error fetching analytics data:', err);
-      setError(err.message || 'فشل في جلب بيانات الإحصائيات.');
+      const userMessage = await handleSupabaseError(err, () => {
+        navigate('/admin/login', { replace: true });
+      });
+      setError(userMessage || 'فشل في جلب بيانات الإحصائيات.');
     } finally {
       setLoading(false);
     }

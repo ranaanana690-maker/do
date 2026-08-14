@@ -6,7 +6,7 @@ import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, BarChart3,
   Archive, Sparkles, CheckCircle2, Clock, Mail, Download, FileText, Layers, Eye
 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabase, handleSupabaseError } from '../lib/supabase';
 import { AdminNavbar } from '../components/AdminNavbar';
 import { RequestDetailsModal } from '../components/RequestDetailsModal';
 
@@ -67,7 +67,10 @@ export const AdminDashboard: React.FC = () => {
       setRequests((data || []).filter(Boolean));
     } catch (err: any) {
       console.error('Error fetching active requests:', err);
-      setError(err.message || 'فشل في جلب البيانات من القاعدة.');
+      const userMessage = await handleSupabaseError(err, () => {
+        navigate('/admin/login', { replace: true });
+      });
+      setError(userMessage || 'فشل في جلب البيانات من القاعدة.');
     } finally {
       setLoading(false);
     }

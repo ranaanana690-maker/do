@@ -6,7 +6,7 @@ import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   CheckCircle2, Archive, FileText, Eye, ShieldCheck, Clock, Trash2, Sparkles
 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabase, handleSupabaseError } from '../lib/supabase';
 import { AdminNavbar } from '../components/AdminNavbar';
 import { RequestDetailsModal } from '../components/RequestDetailsModal';
 
@@ -69,7 +69,10 @@ export const AdminCompleted: React.FC = () => {
       setRequests((data || []).filter(Boolean));
     } catch (err: any) {
       console.error('Error fetching completed requests:', err);
-      setError(err.message || 'فشل في جلب البيانات من الأرشيف.');
+      const userMessage = await handleSupabaseError(err, () => {
+        navigate('/admin/login', { replace: true });
+      });
+      setError(userMessage || 'فشل في جلب البيانات من الأرشيف.');
     } finally {
       setLoading(false);
     }
