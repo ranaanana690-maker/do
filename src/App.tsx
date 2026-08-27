@@ -119,11 +119,7 @@ export default function App() {
   const [isEmailFocused, setIsEmailFocused] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [formData, setFormData] = useState<FormData>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      return JSON.parse(saved).formData;
-    }
-    return {
+    const defaultData: FormData = {
       firstName: '',
       lastName: '',
       dobDay: '',
@@ -142,6 +138,39 @@ export default function App() {
       fileName: '',
       fileError: ''
     };
+
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed.formData === 'object') {
+          return {
+            ...defaultData,
+            ...parsed.formData,
+            firstName: parsed.formData.firstName || '',
+            lastName: parsed.formData.lastName || '',
+            dobDay: parsed.formData.dobDay || '',
+            dobMonth: parsed.formData.dobMonth || '',
+            dobYear: parsed.formData.dobYear || '',
+            bacYear: parsed.formData.bacYear || '',
+            registrationNumber: parsed.formData.registrationNumber || '',
+            requestDomain: parsed.formData.requestDomain || '',
+            housingDocType: parsed.formData.housingDocType || '',
+            transferReason: parsed.formData.transferReason || '',
+            siblingName: parsed.formData.siblingName || '',
+            siblingBacYear: parsed.formData.siblingBacYear || '',
+            siblingRegistrationNumber: parsed.formData.siblingRegistrationNumber || '',
+            emailPrefix: parsed.formData.emailPrefix || '',
+            fileUploaded: Boolean(parsed.formData.fileUploaded),
+            fileName: parsed.formData.fileName || '',
+            fileError: parsed.formData.fileError || ''
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('Could not restore saved form state:', e);
+    }
+    return defaultData;
   });
 
   useEffect(() => {
@@ -240,6 +269,14 @@ export default function App() {
     e.preventDefault();
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     setStatus('submitting');
+
+    const regNumberClean = (formData.registrationNumber || '').trim();
+    const firstNameClean = (formData.firstName || '').trim();
+    const lastNameClean = (formData.lastName || '').trim();
+    const emailPrefixClean = (formData.emailPrefix || '').trim();
+    const siblingNameClean = (formData.siblingName || '').trim();
+    const siblingRegNumberClean = (formData.siblingRegistrationNumber || '').trim();
+    const siblingBacYearClean = (formData.siblingBacYear || '').trim();
     
     try {
       let pdfFilePath = '';
@@ -253,7 +290,7 @@ export default function App() {
         const year = now.getFullYear();
         const month = String(now.getMonth() + 1).padStart(2, '0');
         const uniquePrefix = `${Date.now()}_${crypto.randomUUID().substring(0, 8)}`;
-        const filePath = `${year}/${month}/${formData.registrationNumber.trim()}_${uniquePrefix}_${sanitizedName}`;
+        const filePath = `${year}/${month}/${regNumberClean}_${uniquePrefix}_${sanitizedName}`;
 
         let uploadSucceeded = false;
 
@@ -285,7 +322,7 @@ export default function App() {
               headers: {
                 'Content-Type': selectedFile.type || 'application/pdf',
                 'x-file-name': encodeURIComponent(selectedFile.name),
-                'x-registration-number': encodeURIComponent(formData.registrationNumber.trim())
+                'x-registration-number': encodeURIComponent(regNumberClean)
               },
               body: selectedFile
             });
@@ -307,24 +344,24 @@ export default function App() {
       }
 
       // 2. Insert Record into Supabase Database Table
-      const fullEmail = `${formData.emailPrefix.trim()}@gmail.com`;
+      const fullEmail = `${emailPrefixClean}@gmail.com`;
       const { error: dbError } = await supabase
         .from('housing_requests')
         .insert([
           {
-            first_name: formData.firstName.trim(),
-            last_name: formData.lastName.trim(),
-            dob_day: formData.dobDay,
-            dob_month: formData.dobMonth,
-            dob_year: formData.dobYear,
-            bac_year: formData.bacYear,
-            registration_number: formData.registrationNumber.trim(),
+            first_name: firstNameClean,
+            last_name: lastNameClean,
+            dob_day: formData.dobDay || '',
+            dob_month: formData.dobMonth || '',
+            dob_year: formData.dobYear || '',
+            bac_year: formData.bacYear || '',
+            registration_number: regNumberClean,
             request_domain: formData.requestDomain,
             housing_doc_type: formData.housingDocType || null,
             transfer_reason: formData.transferReason || null,
-            sibling_name: formData.siblingName ? formData.siblingName.trim() : null,
-            sibling_registration_number: formData.siblingRegistrationNumber ? formData.siblingRegistrationNumber.trim() : null,
-            sibling_bac_year: formData.siblingBacYear ? formData.siblingBacYear.trim() : null,
+            sibling_name: siblingNameClean || null,
+            sibling_registration_number: siblingRegNumberClean || null,
+            sibling_bac_year: siblingBacYearClean || null,
             email: fullEmail,
             pdf_file_path: pdfFilePath,
             pdf_file_name: pdfFileName,
@@ -354,10 +391,10 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             recipientEmail: fullEmail,
-            firstName: formData.firstName.trim(),
-            lastName: formData.lastName.trim(),
-            registrationNumber: formData.registrationNumber.trim(),
-            bacYear: formData.bacYear,
+            firstName: firstNameClean,
+            lastName: lastNameClean,
+            registrationNumber: regNumberClean,
+            bacYear: formData.bacYear || '',
             requestDomain: formData.requestDomain,
             templateText: customTemplate
           })
@@ -371,7 +408,7 @@ export default function App() {
         const url = '/api/submit';
         const formPayload = new FormData();
         Object.entries(formData).forEach(([key, value]) => {
-          formPayload.append(key, String(value));
+          formPayload.append(key, String(value ?? ''));
         });
         formPayload.append('email', fullEmail);
         formPayload.append('submissionDate', new Date().toISOString());
@@ -396,21 +433,31 @@ export default function App() {
   };
 
   let dobError = '';
-  const d = parseInt(formData.dobDay, 10);
-  const m = parseInt(formData.dobMonth, 10);
-  const y = parseInt(formData.dobYear, 10);
+  const dobDayStr = formData.dobDay || '';
+  const dobMonthStr = formData.dobMonth || '';
+  const dobYearStr = formData.dobYear || '';
+  const d = parseInt(dobDayStr, 10);
+  const m = parseInt(dobMonthStr, 10);
+  const y = parseInt(dobYearStr, 10);
 
-  if (formData.dobYear.length === 4) {
+  if (dobYearStr.length === 4) {
     if (y < 1950) dobError = 'عذراً، السن غير صالح.';
     else if (y > 2011) dobError = 'تاريخ الميلاد غير متوافق (أصغر من السن القانوني).';
   }
-  if (formData.dobMonth.length === 2 && (m < 1 || m > 12)) dobError = 'شهر غير صالح.';
-  if (formData.dobDay.length === 2 && (d < 1 || d > 31)) dobError = 'يوم غير صالح.';
+  if (dobMonthStr.length === 2 && (m < 1 || m > 12)) dobError = 'شهر غير صالح.';
+  if (dobDayStr.length === 2 && (d < 1 || d > 31)) dobError = 'يوم غير صالح.';
 
-  const isDobValid = formData.dobDay.length === 2 && formData.dobMonth.length === 2 && formData.dobYear.length === 4 && !dobError;
+  const isDobValid = dobDayStr.length === 2 && dobMonthStr.length === 2 && dobYearStr.length === 4 && !dobError;
 
-  const isStep1Valid = formData.firstName.trim().length >= 2 && isArabicOnly(formData.firstName) && formData.lastName.trim().length >= 2 && isArabicOnly(formData.lastName) && isDobValid;
-  const isStep2Valid = formData.bacYear !== '' && formData.registrationNumber.trim().length >= 8 && hasNoArabicCharacters(formData.registrationNumber);
+  const firstNameSafe = (formData.firstName || '').trim();
+  const lastNameSafe = (formData.lastName || '').trim();
+  const regNumberSafe = (formData.registrationNumber || '').trim();
+  const emailPrefixSafe = (formData.emailPrefix || '').trim();
+  const siblingNameSafe = (formData.siblingName || '').trim();
+  const siblingRegNumberSafe = (formData.siblingRegistrationNumber || '').trim();
+
+  const isStep1Valid = firstNameSafe.length >= 2 && isArabicOnly(formData.firstName || '') && lastNameSafe.length >= 2 && isArabicOnly(formData.lastName || '') && isDobValid;
+  const isStep2Valid = (formData.bacYear || '') !== '' && regNumberSafe.length >= 8 && hasNoArabicCharacters(formData.registrationNumber || '');
   
   const isStep3Valid = () => {
     if (!formData.requestDomain) return false;
@@ -421,13 +468,13 @@ export default function App() {
     if (formData.requestDomain === 'تغيير الإقامة') {
       if (!formData.transferReason) return false;
       if (formData.transferReason === 'أخوة') {
-        if (formData.siblingName.trim().length < 3 || !isArabicOnly(formData.siblingName)) return false;
+        if (siblingNameSafe.length < 3 || !isArabicOnly(formData.siblingName || '')) return false;
         if (!formData.siblingBacYear) return false;
-        if (formData.siblingRegistrationNumber.trim().length < 8 || !hasNoArabicCharacters(formData.siblingRegistrationNumber)) return false;
+        if (siblingRegNumberSafe.length < 8 || !hasNoArabicCharacters(formData.siblingRegistrationNumber || '')) return false;
       }
       if (formData.transferReason !== 'أخوة' && !formData.fileUploaded) return false;
     }
-    if (formData.emailPrefix.trim().length < 3 || !hasNoArabicCharacters(formData.emailPrefix)) return false;
+    if (emailPrefixSafe.length < 3 || !hasNoArabicCharacters(formData.emailPrefix || '')) return false;
     return true;
   };
 
@@ -592,26 +639,26 @@ export default function App() {
                 <div>
                   <div className="flex items-center gap-2 mb-2">
                     <label className="block text-sm font-semibold text-slate-700">اللقب (العائلي)</label>
-                    <ValidIndicator isValid={formData.lastName.trim().length >= 2 && isArabicOnly(formData.lastName)} />
+                    <ValidIndicator isValid={(formData.lastName || '').trim().length >= 2 && isArabicOnly(formData.lastName || '')} />
                   </div>
-                  <input type="text" placeholder="اللقب بالعربية" value={formData.lastName}
+                  <input type="text" placeholder="اللقب بالعربية" value={formData.lastName || ''}
                     onChange={(e) => updateForm('lastName', e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && formData.lastName.trim().length >= 2) { e.preventDefault(); firstNameRef.current?.focus(); } }}
-                    className={`w-full bg-slate-50/50 border rounded-xl px-4 py-4 text-slate-800 focus:outline-none focus:ring-2 transition-all placeholder:text-sm ${formData.lastName.length > 0 && !isArabicOnly(formData.lastName) ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-emerald-500'}`}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && (formData.lastName || '').trim().length >= 2) { e.preventDefault(); firstNameRef.current?.focus(); } }}
+                    className={`w-full bg-slate-50/50 border rounded-xl px-4 py-4 text-slate-800 focus:outline-none focus:ring-2 transition-all placeholder:text-sm ${(formData.lastName || '').length > 0 && !isArabicOnly(formData.lastName || '') ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-emerald-500'}`}
                   />
-                  <ErrorText message={formData.lastName.length > 0 && !isArabicOnly(formData.lastName) && 'الرجاء إدخال حروف عربية فقط'} />
+                  <ErrorText message={(formData.lastName || '').length > 0 && !isArabicOnly(formData.lastName || '') && 'الرجاء إدخال حروف عربية فقط'} />
                 </div>
                 <div>
                   <div className="flex items-center gap-2 mb-2">
                     <label className="block text-sm font-semibold text-slate-700">الاسم (الشخصي)</label>
-                    <ValidIndicator isValid={formData.firstName.trim().length >= 2 && isArabicOnly(formData.firstName)} />
+                    <ValidIndicator isValid={(formData.firstName || '').trim().length >= 2 && isArabicOnly(formData.firstName || '')} />
                   </div>
-                  <input ref={firstNameRef} type="text" placeholder="الاسم بالعربية" value={formData.firstName}
+                  <input ref={firstNameRef} type="text" placeholder="الاسم بالعربية" value={formData.firstName || ''}
                     onChange={(e) => updateForm('firstName', e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && formData.firstName.trim().length >= 2) { e.preventDefault(); dayRef.current?.focus(); } }}
-                    className={`w-full bg-slate-50/50 border rounded-xl px-4 py-4 text-slate-800 focus:outline-none focus:ring-2 transition-all placeholder:text-sm ${formData.firstName.length > 0 && !isArabicOnly(formData.firstName) ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-emerald-500'}`}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && (formData.firstName || '').trim().length >= 2) { e.preventDefault(); dayRef.current?.focus(); } }}
+                    className={`w-full bg-slate-50/50 border rounded-xl px-4 py-4 text-slate-800 focus:outline-none focus:ring-2 transition-all placeholder:text-sm ${(formData.firstName || '').length > 0 && !isArabicOnly(formData.firstName || '') ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-emerald-500'}`}
                   />
-                  <ErrorText message={formData.firstName.length > 0 && !isArabicOnly(formData.firstName) && 'الرجاء إدخال حروف عربية فقط'} />
+                  <ErrorText message={(formData.firstName || '').length > 0 && !isArabicOnly(formData.firstName || '') && 'الرجاء إدخال حروف عربية فقط'} />
                 </div>
               </div>
               <div>
@@ -728,20 +775,20 @@ export default function App() {
                 <div>
                   <div className="flex items-center gap-2 mb-2">
                     <label className="block text-sm font-semibold text-slate-700">رقم التسجيل في البكالوريا</label>
-                    <ValidIndicator isValid={formData.registrationNumber.trim().length >= 8 && hasNoArabicCharacters(formData.registrationNumber)} />
+                    <ValidIndicator isValid={(formData.registrationNumber || '').trim().length >= 8 && hasNoArabicCharacters(formData.registrationNumber || '')} />
                   </div>
                   <input 
                     ref={regNumRef}
-                    type="text" dir="ltr" placeholder="مثال: 39012345" value={formData.registrationNumber}
+                    type="text" dir="ltr" placeholder="مثال: 39012345" value={formData.registrationNumber || ''}
                     onChange={(e) => {
                       const val = e.target.value;
                       updateForm('registrationNumber', val);
                     }}
                     onKeyDown={(e) => { if (e.key === 'Enter' && isStep2Valid) { e.preventDefault(); handleNextStep(3); } }}
-                    className={`w-full bg-slate-50/50 border rounded-xl px-5 py-4 text-slate-800 font-mono text-lg tracking-wider text-left focus:outline-none focus:ring-2 transition-all ${formData.registrationNumber.length > 0 && !hasNoArabicCharacters(formData.registrationNumber) ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-emerald-500'}`}
+                    className={`w-full bg-slate-50/50 border rounded-xl px-5 py-4 text-slate-800 font-mono text-lg tracking-wider text-left focus:outline-none focus:ring-2 transition-all ${(formData.registrationNumber || '').length > 0 && !hasNoArabicCharacters(formData.registrationNumber || '') ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-emerald-500'}`}
                   />
-                  <ErrorText message={formData.registrationNumber.length > 0 && !hasNoArabicCharacters(formData.registrationNumber) && 'الرجاء إدخال أرقام وحروف لاتينية فقط'} />
-                  <ErrorText message={formData.registrationNumber.length > 0 && hasNoArabicCharacters(formData.registrationNumber) && formData.registrationNumber.trim().length < 8 && 'يجب أن يتكون رقم التسجيل من 8 أرقام أو حروف على الأقل'} />
+                  <ErrorText message={(formData.registrationNumber || '').length > 0 && !hasNoArabicCharacters(formData.registrationNumber || '') && 'الرجاء إدخال أرقام وحروف لاتينية فقط'} />
+                  <ErrorText message={(formData.registrationNumber || '').length > 0 && hasNoArabicCharacters(formData.registrationNumber || '') && (formData.registrationNumber || '').trim().length < 8 && 'يجب أن يتكون رقم التسجيل من 8 أرقام أو حروف على الأقل'} />
                 </div>
                 <AnimatePresence>
                   {currentStep === 2 && isStep2Valid && (
@@ -831,16 +878,16 @@ export default function App() {
                           <div>
                             <div className="flex items-center gap-2 mb-2">
                               <label className="block text-sm font-semibold text-slate-700">اسم ولقب الأخ أو الأخت (بالعربية)</label>
-                              <ValidIndicator isValid={formData.siblingName.trim().length >= 3 && isArabicOnly(formData.siblingName)} />
+                              <ValidIndicator isValid={(formData.siblingName || '').trim().length >= 3 && isArabicOnly(formData.siblingName || '')} />
                             </div>
                             <input 
                               type="text" 
                               placeholder="مثال: بن عيسى محمد" 
-                              value={formData.siblingName}
+                              value={formData.siblingName || ''}
                               onChange={(e) => updateForm('siblingName', e.target.value)}
-                              className={`w-full bg-white border rounded-xl px-5 py-3.5 text-slate-800 focus:outline-none focus:ring-2 transition-all ${formData.siblingName.length > 0 && !isArabicOnly(formData.siblingName) ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-emerald-500'}`}
+                              className={`w-full bg-white border rounded-xl px-5 py-3.5 text-slate-800 focus:outline-none focus:ring-2 transition-all ${(formData.siblingName || '').length > 0 && !isArabicOnly(formData.siblingName || '') ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-emerald-500'}`}
                             />
-                            <ErrorText message={formData.siblingName.length > 0 && !isArabicOnly(formData.siblingName) && 'الرجاء إدخال حروف عربية فقط'} />
+                            <ErrorText message={(formData.siblingName || '').length > 0 && !isArabicOnly(formData.siblingName || '') && 'الرجاء إدخال حروف عربية فقط'} />
                           </div>
 
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -848,10 +895,10 @@ export default function App() {
                             <div>
                               <div className="flex items-center gap-2 mb-2">
                                 <label className="block text-sm font-semibold text-slate-700">سنة بكالوريا الأخ أو الأخت</label>
-                                <ValidIndicator isValid={formData.siblingBacYear !== ''} />
+                                <ValidIndicator isValid={(formData.siblingBacYear || '') !== ''} />
                               </div>
                               <select 
-                                value={formData.siblingBacYear}
+                                value={formData.siblingBacYear || ''}
                                 onChange={(e) => updateForm('siblingBacYear', e.target.value)}
                                 className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all appearance-none text-sm font-medium"
                                 style={{ backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`, backgroundPosition: 'left 1rem center', backgroundRepeat: 'no-repeat', backgroundSize: '1.2em 1.2em', paddingLeft: '2.5rem' }}
@@ -865,18 +912,18 @@ export default function App() {
                             <div>
                               <div className="flex items-center gap-2 mb-2">
                                 <label className="block text-sm font-semibold text-slate-700">رقم تسجيل البكالوريا (الماتريكيل)</label>
-                                <ValidIndicator isValid={formData.siblingRegistrationNumber.trim().length >= 8 && hasNoArabicCharacters(formData.siblingRegistrationNumber)} />
+                                <ValidIndicator isValid={(formData.siblingRegistrationNumber || '').trim().length >= 8 && hasNoArabicCharacters(formData.siblingRegistrationNumber || '')} />
                               </div>
                               <input 
                                 type="text" 
                                 dir="ltr" 
                                 placeholder="مثال: 38012345" 
-                                value={formData.siblingRegistrationNumber}
+                                value={formData.siblingRegistrationNumber || ''}
                                 onChange={(e) => updateForm('siblingRegistrationNumber', e.target.value)}
-                                className={`w-full bg-white border rounded-xl px-5 py-3.5 text-slate-800 font-mono text-left focus:outline-none focus:ring-2 transition-all ${formData.siblingRegistrationNumber.length > 0 && !hasNoArabicCharacters(formData.siblingRegistrationNumber) ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-emerald-500'}`}
+                                className={`w-full bg-white border rounded-xl px-5 py-3.5 text-slate-800 font-mono text-left focus:outline-none focus:ring-2 transition-all ${(formData.siblingRegistrationNumber || '').length > 0 && !hasNoArabicCharacters(formData.siblingRegistrationNumber || '') ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-emerald-500'}`}
                               />
-                              <ErrorText message={formData.siblingRegistrationNumber.length > 0 && !hasNoArabicCharacters(formData.siblingRegistrationNumber) && 'الرجاء إدخال أرقام وحروف لاتينية فقط'} />
-                              <ErrorText message={formData.siblingRegistrationNumber.length > 0 && hasNoArabicCharacters(formData.siblingRegistrationNumber) && formData.siblingRegistrationNumber.trim().length < 8 && 'يجب أن يتكون رقم التسجيل من 8 أرقام أو حروف على الأقل'} />
+                              <ErrorText message={(formData.siblingRegistrationNumber || '').length > 0 && !hasNoArabicCharacters(formData.siblingRegistrationNumber || '') && 'الرجاء إدخال أرقام وحروف لاتينية فقط'} />
+                              <ErrorText message={(formData.siblingRegistrationNumber || '').length > 0 && hasNoArabicCharacters(formData.siblingRegistrationNumber || '') && (formData.siblingRegistrationNumber || '').trim().length < 8 && 'يجب أن يتكون رقم التسجيل من 8 أرقام أو حروف على الأقل'} />
                             </div>
                           </div>
 
