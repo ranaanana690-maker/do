@@ -55,31 +55,31 @@ export const RequestDetailsModal: React.FC<RequestDetailsModalProps> = ({
     }
     setDownloading(true);
     try {
-      // 1. Try Cloudflare R2 Presigned URL first
+      // 1. Direct signed URL from Supabase Storage client
       try {
-        const r2Res = await fetch(`/api/r2/download-url?key=${encodeURIComponent(request.pdf_file_path)}`);
-        if (r2Res.ok) {
-          const r2Data = await r2Res.json();
-          if (r2Data.downloadUrl) {
-            window.open(r2Data.downloadUrl, '_blank');
-            return;
-          }
+        const { data, error: signedUrlErr } = await supabase.storage
+          .from('housing_pdfs')
+          .createSignedUrl(request.pdf_file_path, 300);
+
+        if (!signedUrlErr && data?.signedUrl) {
+          window.open(data.signedUrl, '_blank');
+          return;
         }
-      } catch (r2Err) {
-        console.warn('R2 download URL fetch notice, checking fallback:', r2Err);
+      } catch (clientErr) {
+        console.warn('Supabase client signed URL notice, trying server fallback:', clientErr);
       }
 
-      // 2. Fallback to Supabase Storage if file was uploaded via Supabase
-      const { data, error: signedUrlErr } = await supabase.storage
-        .from('housing_pdfs')
-        .createSignedUrl(request.pdf_file_path, 60);
-
-      if (signedUrlErr) throw signedUrlErr;
-      if (data?.signedUrl) {
-        window.open(data.signedUrl, '_blank');
-      } else {
-        throw new Error('تعذر توليد رابط التحميل الآمن.');
+      // 2. Fallback to server endpoint
+      const res = await fetch(`/api/storage/download-url?key=${encodeURIComponent(request.pdf_file_path)}`);
+      if (res.ok) {
+        const resData = await res.json();
+        if (resData.downloadUrl) {
+          window.open(resData.downloadUrl, '_blank');
+          return;
+        }
       }
+
+      throw new Error('تعذر توليد رابط التحميل الآمن من Supabase Storage.');
     } catch (err: any) {
       console.error('Error generating signed URL:', err);
       alert(`خطأ في استخراج الوثيقة: ${err.message || 'يرجى التحقق من إعدادات التخزين'}`);
@@ -96,17 +96,38 @@ export const RequestDetailsModal: React.FC<RequestDetailsModalProps> = ({
     }
   };
 
-  // Calculate remaining hours until 24h deletion
-  const getRemainingHours = () => {
+  // Calculate detailed remaining time until 24h deletion
+  const getRemainingTimeDetails = () => {
     if (!request.completed_at || request.file_deleted) return null;
     const completedTime = new Date(request.completed_at).getTime();
     const expiryTime = completedTime + 24 * 60 * 60 * 1000;
     const remainingMs = expiryTime - Date.now();
-    if (remainingMs <= 0) return 0;
-    return Math.ceil(remainingMs / (60 * 60 * 1000));
+    if (remainingMs <= 0) return { hours: 0, minutes: 0, expired: true, text: 'مؤهلة للحذف الآلي الآن', isUrgent: true };
+    
+    const totalMinutes = Math.floor(remainingMs / (60 * 1000));
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    
+    if (hours > 0) {
+      return { 
+        hours, 
+        minutes, 
+        expired: false, 
+        text: `متبقي ${hours} ساعة و ${minutes} دقيقة على الحذف التلقائي`,
+        isUrgent: hours <= 2 
+      };
+    } else {
+      return { 
+        hours: 0, 
+        minutes, 
+        expired: false, 
+        text: `متبقي ${minutes} دقيقة على الحذف التلقائي (أقل من ساعة)`,
+        isUrgent: true 
+      };
+    }
   };
 
-  const remainingHours = getRemainingHours();
+  const timeDetails = getRemainingTimeDetails();
 
   return (
     <AnimatePresence>
@@ -275,22 +296,26 @@ export const RequestDetailsModal: React.FC<RequestDetailsModalProps> = ({
                   <div className="flex items-center gap-2.5 min-w-0">
                     <FileText className="text-emerald-700 shrink-0" size={22} />
                     <div className="min-w-0">
-                      <h5 className="font-bold text-emerald-900 text-xs">وثيقة الطالب المرفقة (Cloudflare R2 PDF Storage)</h5>
+                      <h5 className="font-bold text-emerald-900 text-xs">وثيقة الطالب المرفقة (Supabase Storage PDF)</h5>
                       <p className="text-[11px] text-emerald-700 font-mono truncate max-w-[220px] sm:max-w-xs">{request.pdf_file_name || 'وثيقة الطالب المرفقة.pdf'}</p>
                     </div>
                   </div>
 
                   {request.file_deleted ? (
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-amber-800 bg-amber-100/90 border border-amber-300 px-3 py-1.5 rounded-xl">
-                      <ShieldCheck size={16} className="text-amber-700 shrink-0" />
-                      <span>تم حذف الوثيقة تلقائياً لمرور 24h على الأرشفة</span>
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 bg-slate-100 border border-slate-300 px-3 py-1.5 rounded-xl">
+                      <ShieldCheck size={16} className="text-emerald-600 shrink-0" />
+                      <span>تم حذف الوثيقة تلقائياً لمرور 24 ساعة على اكتمال الطلب</span>
                     </div>
                   ) : request.pdf_file_path ? (
                     <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2 w-full sm:w-auto">
-                      {remainingHours !== null && (
-                        <span className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg flex items-center gap-1">
-                          <Clock size={13} />
-                          متبقي {remainingHours} ساعة على الحذف التلقائي
+                      {timeDetails && (
+                        <span className={`text-[11px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 border ${
+                          timeDetails.isUrgent 
+                            ? 'bg-amber-100 text-amber-900 border-amber-300 animate-pulse' 
+                            : 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                        }`}>
+                          <Clock size={13} className={timeDetails.isUrgent ? 'text-amber-700' : 'text-emerald-700'} />
+                          {timeDetails.text}
                         </span>
                       )}
                       <button

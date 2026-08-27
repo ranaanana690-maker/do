@@ -80,6 +80,8 @@ export const AdminCompleted: React.FC = () => {
 
   useEffect(() => {
     fetchCompletedRequests();
+    // Trigger automated background check for expired files on archive page mount
+    fetch('/api/storage/cleanup', { method: 'POST' }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -135,31 +137,31 @@ export const AdminCompleted: React.FC = () => {
     }
     setDownloadingId(record.id);
     try {
-      // 1. Try Cloudflare R2 Presigned URL first
+      // 1. Direct signed URL from Supabase Storage client
       try {
-        const r2Res = await fetch(`/api/r2/download-url?key=${encodeURIComponent(record.pdf_file_path)}`);
-        if (r2Res.ok) {
-          const r2Data = await r2Res.json();
-          if (r2Data.downloadUrl) {
-            window.open(r2Data.downloadUrl, '_blank');
-            return;
-          }
+        const { data, error: signedUrlErr } = await supabase.storage
+          .from('housing_pdfs')
+          .createSignedUrl(record.pdf_file_path, 300);
+
+        if (!signedUrlErr && data?.signedUrl) {
+          window.open(data.signedUrl, '_blank');
+          return;
         }
-      } catch (r2Err) {
-        console.warn('R2 download URL fetch notice, checking fallback:', r2Err);
+      } catch (clientErr) {
+        console.warn('Supabase client signed URL notice, trying server fallback:', clientErr);
       }
 
-      // 2. Fallback to Supabase Storage if uploaded previously
-      const { data, error: signedUrlErr } = await supabase.storage
-        .from('housing_pdfs')
-        .createSignedUrl(record.pdf_file_path, 60);
-
-      if (signedUrlErr) throw signedUrlErr;
-      if (data?.signedUrl) {
-        window.open(data.signedUrl, '_blank');
-      } else {
-        throw new Error('تعذر توليد رابط التحميل الآمن.');
+      // 2. Fallback to server endpoint
+      const res = await fetch(`/api/storage/download-url?key=${encodeURIComponent(record.pdf_file_path)}`);
+      if (res.ok) {
+        const resData = await res.json();
+        if (resData.downloadUrl) {
+          window.open(resData.downloadUrl, '_blank');
+          return;
+        }
       }
+
+      throw new Error('تعذر توليد رابط التحميل الآمن من Supabase Storage.');
     } catch (err: any) {
       console.error('Error generating signed URL:', err);
       alert(`خطأ في استخراج الوثيقة: ${err.message || 'يرجى التحقق من صلاحيات Storage'}`);
@@ -173,7 +175,7 @@ export const AdminCompleted: React.FC = () => {
     setCleaningUp(true);
     setCleanupNotice(null);
     try {
-      const res = await fetch('/api/r2/cleanup', { method: 'POST' });
+      const res = await fetch('/api/storage/cleanup', { method: 'POST' });
       const data = await res.json();
       if (res.ok) {
         setCleanupNotice(`✅ ${data.message || 'تم فحص وتنظيف الملفات المكتملة بنجاح.'}`);
@@ -189,14 +191,35 @@ export const AdminCompleted: React.FC = () => {
     }
   };
 
-  // Helper for remaining hours calculation
-  const getRemainingHours = (record: HousingRequestRecord) => {
+  // Helper for detailed remaining time calculation
+  const getRemainingTimeDetails = (record: HousingRequestRecord) => {
     if (!record.completed_at || record.file_deleted) return null;
     const completedTime = new Date(record.completed_at).getTime();
     const expiryTime = completedTime + 24 * 60 * 60 * 1000;
     const remainingMs = expiryTime - Date.now();
-    if (remainingMs <= 0) return 0;
-    return Math.ceil(remainingMs / (60 * 60 * 1000));
+    if (remainingMs <= 0) return { hours: 0, minutes: 0, expired: true, text: 'مؤهلة للحذف الآلي الآن', isUrgent: true };
+    
+    const totalMinutes = Math.floor(remainingMs / (60 * 1000));
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    
+    if (hours > 0) {
+      return { 
+        hours, 
+        minutes, 
+        expired: false, 
+        text: `متبقي ${hours}h و ${minutes}m على الحذف`,
+        isUrgent: hours <= 2 
+      };
+    } else {
+      return { 
+        hours: 0, 
+        minutes, 
+        expired: false, 
+        text: `متبقي ${minutes} دقيقة (أقل من ساعة)`,
+        isUrgent: true 
+      };
+    }
   };
 
   const availableBacYears = useMemo(() => {
@@ -259,11 +282,11 @@ export const AdminCompleted: React.FC = () => {
               <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
                 أرشيف الطلبات المكتملة وحماية الخصوصية
                 <span className="text-xs bg-emerald-500/20 text-emerald-300 font-normal px-2.5 py-0.5 rounded-full border border-emerald-400/20">
-                  Cloudflare R2 + 24h Auto-Delete
+                  Supabase Storage + 24h Auto-Delete
                 </span>
               </h2>
               <p className="text-xs sm:text-sm text-emerald-200/90 mt-1 max-w-2xl leading-relaxed">
-                يتم حفظ الطلبات المكتملة هنا بشكل دائم، مع حذف ملفات الـ PDF آلياً من Cloudflare R2 بعد مرور 24 ساعة من اكتمال الطلب لحماية سرية الوثائق وتوفير مساحات التخزين.
+                يتم حفظ الطلبات المكتملة هنا بشكل دائم، مع حذف ملفات الـ PDF آلياً من سلة Supabase Storage بعد مرور 24 ساعة من اكتمال الطلب لحماية سرية الوثائق وتوفير مساحات التخزين.
               </p>
             </div>
           </div>
@@ -370,7 +393,7 @@ export const AdminCompleted: React.FC = () => {
                   <th className="py-4 px-6">رقم وسنة البكالوريا</th>
                   <th className="py-4 px-6">نوع الخدمة</th>
                   <th className="py-4 px-6">حالة الطلب الإدارية</th>
-                  <th className="py-4 px-6">حالة ملف الـ PDF (R2)</th>
+                  <th className="py-4 px-6">حالة ملف الـ PDF (Storage)</th>
                   <th className="py-4 px-6 text-center">الإجراءات</th>
                 </tr>
               </thead>
@@ -396,7 +419,7 @@ export const AdminCompleted: React.FC = () => {
                   </tr>
                 ) : (
                   paginatedRequests.filter(Boolean).map((record) => {
-                    const remainingHours = getRemainingHours(record);
+                    const timeDetails = getRemainingTimeDetails(record);
                     return (
                       <tr key={record?.id || Math.random()} className="hover:bg-slate-50/80 transition-colors">
                         
@@ -452,14 +475,23 @@ export const AdminCompleted: React.FC = () => {
                         {/* File Lifecycle Column */}
                         <td className="py-4 px-6 whitespace-nowrap">
                           {record?.file_deleted ? (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200/80">
-                              <ShieldCheck size={14} className="text-amber-600 shrink-0" />
-                              تم حذف الوثيقة (مرور 24h)
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200/80" title="تم حذف الملف تلقائياً بعد مرور 24 ساعة على اكتمال الطلب لحماية الخصوصية">
+                              <ShieldCheck size={14} className="text-emerald-600 shrink-0" />
+                              تم الحذف الآلي (مرور 24h)
+                            </span>
+                          ) : record?.pdf_file_path && timeDetails ? (
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors ${
+                              timeDetails.isUrgent 
+                                ? 'bg-amber-50 text-amber-800 border-amber-300 animate-pulse' 
+                                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            }`} title="يتم حذف الوثيقة تلقائياً من Supabase Storage بعد 24 ساعة من تاريخ الاكتمال">
+                              <Clock size={14} className={timeDetails.isUrgent ? 'text-amber-600 shrink-0' : 'text-emerald-600 shrink-0'} />
+                              {timeDetails.text}
                             </span>
                           ) : record?.pdf_file_path ? (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
                               <Clock size={14} className="text-emerald-600 shrink-0" />
-                              {remainingHours !== null ? `متبقي ${remainingHours}h على الحذف` : 'متوفرة على R2'}
+                              متوفرة بالتخزين
                             </span>
                           ) : (
                             <span className="text-xs text-slate-400">لا توجد وثيقة</span>
@@ -484,7 +516,7 @@ export const AdminCompleted: React.FC = () => {
                                 onClick={() => handleDownloadPDF(record)}
                                 disabled={downloadingId === record.id}
                                 className="p-2.5 bg-emerald-50 hover:bg-emerald-600 text-emerald-700 hover:text-white rounded-xl transition-all border border-emerald-200/90 active:scale-95 disabled:opacity-50 shadow-2xs shrink-0 cursor-pointer"
-                                title="تحميل وثيقة PDF من Cloudflare R2"
+                                title="تحميل وثيقة PDF من Supabase Storage"
                               >
                                 {downloadingId === record.id ? (
                                   <div className="w-4 h-4 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>

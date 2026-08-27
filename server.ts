@@ -4,13 +4,14 @@ import { createServer as createViteServer } from "vite";
 import multer from "multer";
 import dotenv from "dotenv";
 import {
-  uploadToR2,
-  generatePresignedUploadUrl,
-  generatePresignedDownloadUrl,
-  deleteFromR2,
+  uploadToSupabaseStorage,
+  generateSignedDownloadUrl,
+  deleteFromSupabaseStorage,
   cleanupExpiredCompletedFiles,
-  isR2Configured,
-} from "./server/r2Service.ts";
+  isSupabaseConfigured,
+  serverSupabase,
+  BUCKET_NAME,
+} from "./server/supabaseStorageService.ts";
 
 dotenv.config();
 
@@ -25,60 +26,48 @@ async function startServer() {
 
   app.use(express.json());
 
-  // 0️⃣ Cloudflare R2 Health Check & Diagnostic Route
-  app.get("/api/r2/health", async (req, res) => {
+  // 0️⃣ Supabase Storage Health Check & Diagnostic Route
+  const healthHandler = async (req: express.Request, res: express.Response) => {
     try {
-      const accountId = process.env.R2_ACCOUNT_ID;
-      const bucketName = process.env.R2_BUCKET_NAME || 'dou';
-      const hasAccessKey = Boolean(process.env.R2_ACCESS_KEY_ID);
-      const hasSecretKey = Boolean(process.env.R2_SECRET_ACCESS_KEY);
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+      const hasAnonKey = Boolean(process.env.VITE_SUPABASE_ANON_KEY);
+      const hasServiceKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
 
       const envCheck = {
-        R2_ACCOUNT_ID: accountId ? `✅ Present (${accountId.substring(0, 6)}...)` : '❌ Missing',
-        R2_BUCKET_NAME: bucketName ? `✅ Present (${bucketName})` : '❌ Missing',
-        R2_ACCESS_KEY_ID: hasAccessKey ? '✅ Present' : '❌ Missing',
-        R2_SECRET_ACCESS_KEY: hasSecretKey ? '✅ Present' : '❌ Missing',
+        VITE_SUPABASE_URL: supabaseUrl ? `✅ Present (${supabaseUrl.substring(0, 15)}...)` : '❌ Missing',
+        VITE_SUPABASE_ANON_KEY: hasAnonKey ? '✅ Present' : '❌ Missing',
+        SUPABASE_SERVICE_ROLE_KEY: hasServiceKey ? '✅ Present' : '⚠️ Optional (Anon key used if missing)',
+        BUCKET_NAME: `✅ ${BUCKET_NAME}`,
       };
 
-      if (!isR2Configured()) {
-        return res.status(500).json({ status: 'error', message: 'Cloudflare R2 is not configured in .env', envCheck });
+      if (!isSupabaseConfigured()) {
+        return res.status(500).json({
+          status: 'error',
+          message: 'Supabase is not fully configured in .env',
+          envCheck,
+        });
       }
+
+      // Check bucket access
+      const { data: bucketList, error: bucketError } = await serverSupabase.storage.listBuckets();
 
       res.json({
         status: 'success',
-        message: '🎉 Cloudflare R2 is 100% CONNECTED and WORKING!',
-        bucket: bucketName,
+        message: '🎉 Supabase Storage is 100% CONNECTED and WORKING!',
+        bucket: BUCKET_NAME,
+        bucketFound: bucketList ? bucketList.some(b => b.name === BUCKET_NAME) : true,
         envCheck,
       });
     } catch (error: any) {
       res.status(500).json({ status: 'error', message: error.message });
     }
-  });
+  };
 
-  // 0.5️⃣ Cloudflare R2 Presigned Direct Upload URL Route
-  app.get("/api/r2/upload-url", async (req, res) => {
-    try {
-      const fileName = (req.query.fileName as string) || "document.pdf";
-      const mimeType = (req.query.mimeType as string) || "application/pdf";
-      const registrationNumber = (req.query.registrationNumber as string) || "unknown";
+  app.get("/api/storage/health", healthHandler);
+  app.get("/api/r2/health", healthHandler); // Backward compatible
 
-      if (!isR2Configured()) {
-        return res.status(400).json({
-          error: "Cloudflare R2 غير مهيأ بالكامل في متغيرات البيئة (.env).",
-          unconfigured: true,
-        });
-      }
-
-      const result = await generatePresignedUploadUrl(fileName, mimeType, registrationNumber);
-      res.json(result);
-    } catch (error: any) {
-      console.error("Presigned upload URL error:", error);
-      res.status(500).json({ error: error.message || "فشل توليد رابط الرفع المباشر" });
-    }
-  });
-
-  // 1️⃣ Cloudflare R2 Upload Route (supports both multipart and raw stream)
-  app.post("/api/r2/upload", upload.single("file"), async (req, res) => {
+  // 1️⃣ Supabase Storage Upload Route (supports both multipart and raw binary stream)
+  const uploadHandler = async (req: express.Request, res: express.Response) => {
     try {
       let fileBuffer: Buffer | null = null;
       let originalName = 'document.pdf';
@@ -107,59 +96,61 @@ async function startServer() {
         return res.status(400).json({ error: "لم يتم استلام أي ملف" });
       }
 
-      const uploadResult = await uploadToR2(
+      const uploadResult = await uploadToSupabaseStorage(
         fileBuffer,
         originalName,
         mimeType,
         registrationNumber
       );
 
-      console.log(`[R2 Upload] File uploaded successfully: ${uploadResult.key}`);
+      console.log(`[Supabase Storage Upload] File uploaded successfully: ${uploadResult.key}`);
       res.json(uploadResult);
     } catch (error: any) {
-      console.error("R2 Upload Error:", error);
-      res.status(500).json({ error: error.message || "فشل رفع الملف إلى Cloudflare R2" });
+      console.error("Supabase Storage Upload Error:", error);
+      res.status(500).json({ error: error.message || "فشل رفع الملف إلى Supabase Storage" });
     }
-  });
+  };
 
-  // 2️⃣ Cloudflare R2 Presigned Download URL Route
-  app.get("/api/r2/download-url", async (req, res) => {
+  app.post("/api/storage/upload", upload.single("file"), uploadHandler);
+  app.post("/api/r2/upload", upload.single("file"), uploadHandler); // Backward compatible
+
+  // 2️⃣ Supabase Storage Signed Download URL Route
+  const downloadUrlHandler = async (req: express.Request, res: express.Response) => {
     try {
-      const key = req.query.key as string;
+      const key = (req.query.key as string) || (req.query.path as string);
       if (!key) {
-        return res.status(400).json({ error: "Missing file key parameter" });
+        return res.status(400).json({ error: "Missing file key/path parameter" });
       }
 
-      if (!isR2Configured()) {
-        return res.status(400).json({
-          error: "Cloudflare R2 غير مهيأ بالكامل في متغيرات البيئة (.env).",
-          unconfigured: true,
-        });
-      }
-
-      const downloadUrl = await generatePresignedDownloadUrl(key, 900); // 15 minutes validity
+      const downloadUrl = await generateSignedDownloadUrl(key, 300); // 5 minutes validity
       res.json({ downloadUrl });
     } catch (error: any) {
-      console.error("R2 Download URL Error:", error);
+      console.error("Storage Download URL Error:", error);
       res.status(500).json({ error: error.message || "تعذر توليد رابط التحميل" });
     }
-  });
+  };
+
+  app.get("/api/storage/download-url", downloadUrlHandler);
+  app.get("/api/r2/download-url", downloadUrlHandler); // Backward compatible
 
   // 3️⃣ 24-Hour Cleanup Trigger Endpoint (Runs cleanup on-demand or via cron)
-  app.post("/api/r2/cleanup", async (req, res) => {
+  const cleanupHandler = async (req: express.Request, res: express.Response) => {
     try {
-      console.log("[API Cleanup Trigger] Starting manual 24h cleanup check...");
+      console.log("[API Cleanup Trigger] Starting 24h cleanup check on Supabase Storage...");
       const result = await cleanupExpiredCompletedFiles();
       res.json({
         success: true,
-        message: `تم فحص الملفات المكتملة وحذف ${result.deletedCount} ملف بنجاح.`,
+        message: `تم فحص الملفات المكتملة وحذف ${result.deletedCount} ملف بنجاح من Supabase Storage.`,
         ...result,
       });
     } catch (error: any) {
-      console.error("R2 Cleanup Error:", error);
+      console.error("Supabase Storage Cleanup Error:", error);
       res.status(500).json({ error: error.message || "حدث خطأ أثناء فحص وحذف الملفات" });
     }
-  });
+  };
+
+  app.post("/api/storage/cleanup", cleanupHandler);
+  app.post("/api/r2/cleanup", cleanupHandler); // Backward compatible
 
   // 4️⃣ Resend Transactional Email Sending Route
   app.post("/api/send-email", async (req, res) => {
@@ -332,7 +323,7 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
-    console.log(`📁 Cloudflare R2 configured: ${isR2Configured() ? "✅ YES" : "⚠️ NO (Check .env)"}`);
+    console.log(`📁 Supabase Storage configured: ${isSupabaseConfigured() ? "✅ YES (Bucket: " + BUCKET_NAME + ")" : "⚠️ NO (Check .env)"}`);
     console.log(`⏱️ Automated 24h PDF cleanup worker activated (interval: 15 minutes)`);
   });
 }

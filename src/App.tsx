@@ -241,47 +241,42 @@ export default function App() {
       let pdfFilePath = '';
       let pdfFileName = '';
 
-      // 1. Upload PDF to Cloudflare R2 (Direct Presigned Upload -> Proxy Upload -> Supabase Fallback)
+      // 1. Upload PDF to Supabase Storage (Direct Supabase Client -> Server Proxy Fallback)
       if (selectedFile) {
         pdfFileName = selectedFile.name;
+        const sanitizedName = selectedFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const uniquePrefix = `${Date.now()}_${crypto.randomUUID().substring(0, 8)}`;
+        const filePath = `${year}/${month}/${formData.registrationNumber.trim()}_${uniquePrefix}_${sanitizedName}`;
+
         let uploadSucceeded = false;
-        
-        // Method A: Direct Presigned Upload to R2 (Best for Vercel, fastest, bypasses body limits)
+
+        // Method A: Direct Upload via Supabase JS Client (Fastest & Secure)
         try {
-          const urlParams = new URLSearchParams({
-            fileName: selectedFile.name,
-            mimeType: selectedFile.type || 'application/pdf',
-            registrationNumber: formData.registrationNumber.trim()
-          });
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('housing_pdfs')
+            .upload(filePath, selectedFile, {
+              contentType: selectedFile.type || 'application/pdf',
+              upsert: false,
+            });
 
-          const presignedRes = await fetch(`/api/r2/upload-url?${urlParams.toString()}`);
-          if (presignedRes.ok) {
-            const presignedData = await presignedRes.json();
-            if (presignedData.uploadUrl) {
-              const directPutRes = await fetch(presignedData.uploadUrl, {
-                method: 'PUT',
-                headers: {
-                  'Content-Type': selectedFile.type || 'application/pdf',
-                },
-                body: selectedFile
-              });
-
-              if (directPutRes.ok) {
-                pdfFilePath = presignedData.key;
-                pdfFileName = presignedData.fileName || selectedFile.name;
-                uploadSucceeded = true;
-                console.log('[R2 Direct Upload Success]:', pdfFilePath);
-              }
-            }
+          if (uploadError) {
+            console.warn('Direct Supabase Storage upload error, trying method B:', uploadError);
+          } else if (uploadData?.path) {
+            pdfFilePath = uploadData.path;
+            uploadSucceeded = true;
+            console.log('[Supabase Storage Direct Upload Success]:', pdfFilePath);
           }
         } catch (directErr) {
-          console.warn('Direct R2 presigned upload notice, trying method B:', directErr);
+          console.warn('Direct Supabase upload notice, trying method B:', directErr);
         }
 
-        // Method B: Server Endpoint Upload (Binary payload compatible with Vercel serverless & Express)
+        // Method B: Server Proxy Upload (Fallback)
         if (!uploadSucceeded) {
           try {
-            const r2Res = await fetch('/api/r2/upload', {
+            const serverRes = await fetch('/api/storage/upload', {
               method: 'POST',
               headers: {
                 'Content-Type': selectedFile.type || 'application/pdf',
@@ -291,37 +286,18 @@ export default function App() {
               body: selectedFile
             });
 
-            if (r2Res.ok) {
-              const r2Data = await r2Res.json();
-              pdfFilePath = r2Data.key;
-              pdfFileName = r2Data.fileName || selectedFile.name;
+            if (serverRes.ok) {
+              const serverData = await serverRes.json();
+              pdfFilePath = serverData.key;
+              pdfFileName = serverData.fileName || selectedFile.name;
               uploadSucceeded = true;
-              console.log('[R2 Server Upload Success]:', pdfFilePath);
+              console.log('[Supabase Storage Server Upload Success]:', pdfFilePath);
             } else {
-              const errText = await r2Res.text();
-              console.warn('[R2 Server Upload Error Response]:', r2Res.status, errText);
+              const errText = await serverRes.text();
+              console.warn('[Supabase Storage Server Upload Error]:', serverRes.status, errText);
             }
-          } catch (r2Err) {
-            console.warn('R2 proxy upload notice, trying Supabase Storage fallback:', r2Err);
-          }
-        }
-
-        // Method C: Fallback to Supabase Storage if R2 is unavailable
-        if (!uploadSucceeded) {
-          try {
-            pdfFilePath = `${Date.now()}_${crypto.randomUUID()}_${formData.registrationNumber}.pdf`;
-            const { error: uploadError } = await supabase.storage
-              .from('housing_pdfs')
-              .upload(pdfFilePath, selectedFile, {
-                contentType: 'application/pdf',
-                upsert: false,
-              });
-
-            if (uploadError) {
-              console.warn('Supabase storage upload warning:', uploadError);
-            }
-          } catch (sbStorageErr) {
-            console.warn('Supabase storage exception:', sbStorageErr);
+          } catch (serverErr) {
+            console.warn('Server storage upload notice:', serverErr);
           }
         }
       }

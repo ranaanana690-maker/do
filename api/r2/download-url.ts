@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { generatePresignedDownloadUrl, isR2Configured } from '../../server/r2Service.ts';
+import { generateSignedDownloadUrl, isSupabaseConfigured } from '../../server/supabaseStorageService.ts';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') {
@@ -7,19 +7,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const key = req.query.key as string;
+    const key = (req.query.key as string) || (req.query.path as string);
     if (!key) {
       return res.status(400).json({ error: 'Missing key parameter' });
     }
 
-    if (!isR2Configured()) {
+    if (!isSupabaseConfigured()) {
       return res.status(400).json({
-        error: 'Cloudflare R2 is not configured in Vercel environment variables.',
+        error: 'Supabase is not configured in Vercel environment variables.',
         unconfigured: true,
       });
     }
 
-    const downloadUrl = await generatePresignedDownloadUrl(key, 900);
+    const downloadUrl = await generateSignedDownloadUrl(key, 300);
     return res.status(200).json({ downloadUrl });
   } catch (error: any) {
     console.error('Download URL generation error:', error);

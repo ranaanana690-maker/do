@@ -89,6 +89,8 @@ export const AdminDashboard: React.FC = () => {
     setIsDetailsOpen(true);
   };
 
+  const [completionNotice, setCompletionNotice] = useState<string | null>(null);
+
   const handleStatusChange = async (recordId: string, newStatus: string) => {
     if (!recordId) return;
     setUpdatingId(recordId);
@@ -112,6 +114,8 @@ export const AdminDashboard: React.FC = () => {
         if (selectedRequest?.id === recordId) {
           setIsDetailsOpen(false);
         }
+        setCompletionNotice('✅ تم نقل الطلب إلى «أرشيف الطلبات المكتملة»، وبدأ العداد التنازلي لحذف وثيقة الـ PDF تلقائياً بعد 24 ساعة.');
+        setTimeout(() => setCompletionNotice(null), 6000);
       } else {
         setRequests(prev => (prev || []).map(r => r && r.id === recordId ? { ...r, ...updatePayload } : r));
         if (selectedRequest?.id === recordId) {
@@ -133,31 +137,31 @@ export const AdminDashboard: React.FC = () => {
     }
     setDownloadingId(record.id);
     try {
-      // 1. Try Cloudflare R2 Presigned URL first
+      // 1. Direct signed URL from Supabase Storage client
       try {
-        const r2Res = await fetch(`/api/r2/download-url?key=${encodeURIComponent(record.pdf_file_path)}`);
-        if (r2Res.ok) {
-          const r2Data = await r2Res.json();
-          if (r2Data.downloadUrl) {
-            window.open(r2Data.downloadUrl, '_blank');
-            return;
-          }
+        const { data, error: signedUrlErr } = await supabase.storage
+          .from('housing_pdfs')
+          .createSignedUrl(record.pdf_file_path, 300);
+
+        if (!signedUrlErr && data?.signedUrl) {
+          window.open(data.signedUrl, '_blank');
+          return;
         }
-      } catch (r2Err) {
-        console.warn('R2 download URL fetch notice, fallback to Supabase storage:', r2Err);
+      } catch (clientErr) {
+        console.warn('Supabase client signed URL notice, trying server fallback:', clientErr);
       }
 
-      // 2. Fallback to Supabase Storage if uploaded previously via Supabase
-      const { data, error: signedUrlErr } = await supabase.storage
-        .from('housing_pdfs')
-        .createSignedUrl(record.pdf_file_path, 60);
-
-      if (signedUrlErr) throw signedUrlErr;
-      if (data?.signedUrl) {
-        window.open(data.signedUrl, '_blank');
-      } else {
-        throw new Error('تعذر توليد رابط التحميل الآمن.');
+      // 2. Fallback to server endpoint
+      const res = await fetch(`/api/storage/download-url?key=${encodeURIComponent(record.pdf_file_path)}`);
+      if (res.ok) {
+        const resData = await res.json();
+        if (resData.downloadUrl) {
+          window.open(resData.downloadUrl, '_blank');
+          return;
+        }
       }
+
+      throw new Error('تعذر توليد رابط التحميل الآمن من Supabase Storage.');
     } catch (err: any) {
       console.error('Error generating signed URL:', err);
       alert(`خطأ في استخراج الوثيقة: ${err.message || 'يرجى التحقق من صلاحيات Storage'}`);
@@ -225,6 +229,22 @@ export const AdminDashboard: React.FC = () => {
       {/* Main Content Workspace */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 sm:pt-8 space-y-6 sm:space-y-8">
         
+        {/* Completion Toast Banner */}
+        {completionNotice && (
+          <div className="bg-emerald-600 text-white px-5 py-3.5 rounded-2xl shadow-lg flex items-center justify-between gap-3 text-xs sm:text-sm font-bold animate-in fade-in slide-in-from-top-2 duration-300">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 size={18} className="text-white shrink-0" />
+              <span>{completionNotice}</span>
+            </div>
+            <button 
+              onClick={() => setCompletionNotice(null)}
+              className="text-emerald-200 hover:text-white cursor-pointer text-xs underline shrink-0"
+            >
+              إغلاق
+            </button>
+          </div>
+        )}
+
         {/* Sleek Modern Hero Banner */}
         <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-950 text-white rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-800/80 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 relative overflow-hidden">
           <div className="space-y-2 relative z-10">

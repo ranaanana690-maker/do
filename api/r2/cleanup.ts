@@ -1,12 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { cleanupExpiredCompletedFiles } from '../../server/r2Service.ts';
+import { cleanupExpiredCompletedFiles } from '../../server/supabaseStorageService.ts';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const result = await cleanupExpiredCompletedFiles();
     return res.status(200).json({
       success: true,
-      message: `تم فحص الملفات المكتملة وحذف ${result.deletedCount} ملف بنجاح.`,
+      message: `تم فحص الملفات المكتملة وحذف ${result.deletedCount} ملف بنجاح من Supabase Storage.`,
       ...result,
     });
   } catch (error: any) {

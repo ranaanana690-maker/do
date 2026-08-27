@@ -1,61 +1,51 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { ListObjectsV2Command } from '@aws-sdk/client-s3';
-import { s3Client, isR2Configured } from '../../server/r2Service.ts';
+import { isSupabaseConfigured, serverSupabase, BUCKET_NAME } from '../../server/supabaseStorageService.ts';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const accountId = process.env.R2_ACCOUNT_ID;
-  const bucketName = process.env.R2_BUCKET_NAME || 'dou';
-  const hasAccessKey = Boolean(process.env.R2_ACCESS_KEY_ID);
-  const hasSecretKey = Boolean(process.env.R2_SECRET_ACCESS_KEY);
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+  const hasAnonKey = Boolean(process.env.VITE_SUPABASE_ANON_KEY);
+  const hasServiceKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
 
   const envCheck = {
-    R2_ACCOUNT_ID: accountId ? `✅ Present (${accountId.substring(0, 6)}...)` : '❌ Missing in Vercel',
-    R2_BUCKET_NAME: bucketName ? `✅ Present (${bucketName})` : '❌ Missing in Vercel',
-    R2_ACCESS_KEY_ID: hasAccessKey ? '✅ Present' : '❌ Missing in Vercel',
-    R2_SECRET_ACCESS_KEY: hasSecretKey ? '✅ Present' : '❌ Missing in Vercel',
-    VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL ? '✅ Present' : '❌ Missing in Vercel',
-    VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY ? '✅ Present' : '❌ Missing in Vercel',
+    VITE_SUPABASE_URL: supabaseUrl ? `✅ Present (${supabaseUrl.substring(0, 15)}...)` : '❌ Missing in Vercel',
+    VITE_SUPABASE_ANON_KEY: hasAnonKey ? '✅ Present' : '❌ Missing in Vercel',
+    SUPABASE_SERVICE_ROLE_KEY: hasServiceKey ? '✅ Present' : '⚠️ Optional',
+    BUCKET_NAME: `✅ ${BUCKET_NAME}`,
   };
 
-  if (!isR2Configured()) {
+  if (!isSupabaseConfigured()) {
     return res.status(500).json({
       status: 'error',
-      message: 'Cloudflare R2 environment variables are incomplete in Vercel Settings -> Environment Variables.',
+      message: 'Supabase environment variables are incomplete in Vercel Settings -> Environment Variables.',
       envCheck,
     });
   }
 
   try {
-    const listRes = await s3Client.send(
-      new ListObjectsV2Command({
-        Bucket: bucketName,
-        MaxKeys: 10,
-      })
-    );
+    const { data: bucketList, error } = await serverSupabase.storage.listBuckets();
+
+    if (error) {
+      throw error;
+    }
 
     return res.status(200).json({
       status: 'success',
-      message: '🎉 Cloudflare R2 is 100% CONNECTED and WORKING on Vercel!',
-      bucket: bucketName,
-      totalObjectsFound: listRes.KeyCount || 0,
-      sampleObjects: (listRes.Contents || []).map((o) => ({
-        key: o.Key,
-        sizeBytes: o.Size,
-        lastModified: o.LastModified,
-      })),
+      message: '🎉 Supabase Storage is 100% CONNECTED and WORKING on Vercel!',
+      bucket: BUCKET_NAME,
+      buckets: (bucketList || []).map((b) => b.name),
       envCheck,
     });
   } catch (error: any) {
-    console.error('R2 Healthcheck Error:', error);
+    console.error('Supabase Healthcheck Error:', error);
     return res.status(500).json({
       status: 'error',
-      message: `Failed to connect to Cloudflare R2: ${error.message}`,
+      message: `Failed to connect to Supabase Storage: ${error.message}`,
       errorDetails: error.name || error.code,
       envCheck,
       troubleshooting: [
-        '1. Ensure R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY have Admin Read & Write permissions on bucket ' + bucketName,
-        '2. Verify that bucket name matches exactly (e.g. dou)',
-        '3. Make sure to Redeploy on Vercel after updating Environment Variables',
+        '1. Ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY or SUPABASE_SERVICE_ROLE_KEY are set correctly.',
+        '2. Verify that bucket "housing_pdfs" is created in Supabase Dashboard -> Storage.',
+        '3. Run the SQL in supabase_schema.sql in Supabase SQL Editor.',
       ],
     });
   }
