@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
 import { 
   Home, RefreshCw, MapPin, Stethoscope, Map, 
-  CheckCircle2, Sparkles, ArrowLeft, Upload, Mail, Users, HeartPulse, Accessibility, FileText, AlertCircle, Wallet, Info
+  CheckCircle2, Sparkles, ArrowLeft, Upload, Mail, Users, HeartPulse, Accessibility, FileText, AlertCircle, AlertTriangle, Wallet, Info
 } from 'lucide-react';
 
 type BacYear = string;
@@ -115,7 +115,8 @@ export default function App() {
     const saved = localStorage.getItem(STORAGE_KEY);
     return saved ? JSON.parse(saved).currentStep : 1;
   });
-  const [status, setStatus] = useState<'filling' | 'submitting' | 'success'>('filling');
+  const [status, setStatus] = useState<'filling' | 'submitting' | 'success' | 'error'>('filling');
+  const [submissionError, setSubmissionError] = useState<string>('');
   const [isEmailFocused, setIsEmailFocused] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [formData, setFormData] = useState<FormData>(() => {
@@ -281,6 +282,7 @@ export default function App() {
     try {
       let pdfFilePath = '';
       let pdfFileName = '';
+      let uploadSucceeded = false;
 
       // 1. Upload PDF to Supabase Storage (Direct Supabase Client -> Server Proxy Fallback)
       if (selectedFile) {
@@ -291,8 +293,6 @@ export default function App() {
         const month = String(now.getMonth() + 1).padStart(2, '0');
         const uniquePrefix = `${Date.now()}_${crypto.randomUUID().substring(0, 8)}`;
         const filePath = `${year}/${month}/${regNumberClean}_${uniquePrefix}_${sanitizedName}`;
-
-        let uploadSucceeded = false;
 
         // Method A: Direct Upload via Supabase JS Client (Fastest & Secure)
         try {
@@ -343,6 +343,11 @@ export default function App() {
         }
       }
 
+      // Check if file was mandatory and uploaded successfully
+      if (needsFileUpload && (!pdfFilePath || !uploadSucceeded)) {
+        throw new Error('تعذر رفع وثيقة الـ PDF المرفقة إلى السيرفر السحابي. يرجى التحقق من اتصالك بالإنترنت والمحاولة مجدداً.');
+      }
+
       // 2. Insert Record into Supabase Database Table
       const fullEmail = `${emailPrefixClean}@gmail.com`;
       const { error: dbError } = await supabase
@@ -370,7 +375,8 @@ export default function App() {
         ]);
 
       if (dbError) {
-        console.warn('Supabase database insert warning:', dbError);
+        console.error('Supabase database insert error:', dbError);
+        throw new Error(`فشل تسجيل وحفظ بياناتك في المنصة: ${dbError.message || 'خطأ في قاعدة البيانات'}`);
       }
 
       // 3. Send Confirmation Email via Brevo API using custom Supabase Template
@@ -427,8 +433,8 @@ export default function App() {
       setStatus('success');
     } catch (error: any) {
       console.error('Error submitting application:', error);
-      alert('عذراً، حدث خطأ أثناء إرسال البيانات. يرجى المحاولة مرة أخرى.');
-      setStatus('filling');
+      setSubmissionError(error?.message || 'تعذر إرسال الطلب وحفظ الملف في المنصة بسبب مشكلة تقنية أو انقطاع في الاتصال.');
+      setStatus('error');
     }
   };
 
@@ -605,9 +611,84 @@ export default function App() {
             <strong>ملاحظة:</strong> يرجى عدم إعادة التسجيل مرة ثانية إلا بعد انقضاء 24 ساعة دون تلقي رسالة التأكيد على البريد الإلكتروني.
           </div>
 
-          <button onClick={() => window.location.reload()} className="text-emerald-600 font-bold hover:text-emerald-700 transition-colors relative z-10 px-6 py-2 rounded-full hover:bg-emerald-50">
+          <button onClick={() => window.location.reload()} className="text-emerald-600 font-bold hover:text-emerald-700 transition-colors relative z-10 px-6 py-2 rounded-full hover:bg-emerald-50 cursor-pointer">
             العودة للرئيسية
           </button>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (status === 'error') {
+    return (
+      <div dir="rtl" className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans text-slate-900 selection:bg-red-200">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9 }} 
+          animate={{ opacity: 1, scale: 1 }} 
+          transition={{ type: 'spring', bounce: 0.3, duration: 0.7 }} 
+          className="bg-white rounded-3xl shadow-2xl shadow-red-500/10 max-w-lg w-full p-7 md:p-10 text-center border border-red-100 relative overflow-hidden"
+        >
+          <div className="absolute inset-0 bg-gradient-to-br from-red-50/70 via-transparent to-amber-50/40 opacity-80" />
+          
+          <motion.div 
+            initial={{ scale: 0 }} 
+            animate={{ scale: 1 }} 
+            transition={{ delay: 0.15, type: 'spring', bounce: 0.5 }} 
+            className="w-22 h-22 md:w-24 md:h-24 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-6 relative z-10 shadow-inner"
+          >
+            <AlertTriangle size={44} strokeWidth={2.2} />
+          </motion.div>
+
+          <h2 className="text-2xl md:text-3xl font-extrabold text-slate-800 mb-3 relative z-10 tracking-tight">
+            عذراً، تعذّر إرسال طلبك ولم يصل إلينا
+          </h2>
+          
+          <p className="text-slate-600 mb-6 text-sm md:text-base leading-relaxed relative z-10 font-normal">
+            حدث انقطاع أو خطأ تقني غير متوقع أثناء محاولة تسجيل ملفك في المنصة. <strong className="text-slate-800 font-bold">بياناتك المدخلة محفوظة بالكامل ولم تفقدها</strong>، ويمكنك إعادة الإرسال فوراً أو التواصل مع الدعم الفني.
+          </p>
+
+          {/* Details / Error Notice Box */}
+          <div className="bg-red-50/90 border border-red-200 p-4 rounded-2xl text-red-800 text-xs md:text-sm font-medium relative z-10 mb-5 text-right space-y-1.5">
+            <div className="flex items-center gap-2 font-bold text-red-900 text-xs">
+              <AlertCircle size={15} className="shrink-0" />
+              <span>سبب تعذر الإرسال:</span>
+            </div>
+            <p className="text-red-700 leading-relaxed font-normal text-xs">
+              {submissionError || 'تعذر الاتصال بقاعدة البيانات أو رفع الوثيقة المرفقة. يرجى التحقق من جودة اتصالك بالإنترنت.'}
+            </p>
+          </div>
+
+          {/* Support Info Box */}
+          <div className="bg-slate-50 border border-slate-200/80 p-4 rounded-2xl text-slate-700 text-xs text-right space-y-2 mb-6 relative z-10">
+            <div className="flex items-center gap-2 font-bold text-slate-800">
+              <Info size={15} className="text-blue-600 shrink-0" />
+              <span>لطلب المساعدة أو الدعم الفني:</span>
+            </div>
+            <p className="text-slate-600 leading-relaxed">
+              إذا استمرت المشكلة، يرجى التوجه إلى <strong className="text-slate-800">مصلحة الإيواء بمديرية الخدمات الجامعية معسكر</strong> مصحوباً برقم تسجيل البكالوريا الخاص بك للمساعدة الفورية.
+            </p>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex flex-col sm:flex-row gap-3 relative z-10 pt-1">
+            <button 
+              onClick={(e) => {
+                handleSubmit(e as any);
+              }}
+              className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 px-5 rounded-xl shadow-lg shadow-emerald-600/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 text-sm cursor-pointer"
+            >
+              <RefreshCw size={17} />
+              إعادة المحاولة الآن
+            </button>
+
+            <button 
+              onClick={() => setStatus('filling')}
+              className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-3.5 px-5 rounded-xl border border-slate-200 active:scale-[0.98] transition-all flex items-center justify-center gap-2 text-sm cursor-pointer"
+            >
+              <ArrowLeft size={17} />
+              مراجعة وتعديل البيانات
+            </button>
+          </div>
         </motion.div>
       </div>
     );
