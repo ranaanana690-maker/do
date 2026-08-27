@@ -24,6 +24,8 @@ interface FormData {
   housingDocType: HousingDocType;
   transferReason: TransferReason;
   siblingName: string;
+  siblingBacYear: string;
+  siblingRegistrationNumber: string;
   emailPrefix: string;
   fileUploaded: boolean;
   fileName: string;
@@ -133,6 +135,8 @@ export default function App() {
       housingDocType: '',
       transferReason: '',
       siblingName: '',
+      siblingBacYear: '',
+      siblingRegistrationNumber: '',
       emailPrefix: '',
       fileUploaded: false,
       fileName: '',
@@ -319,6 +323,8 @@ export default function App() {
             housing_doc_type: formData.housingDocType || null,
             transfer_reason: formData.transferReason || null,
             sibling_name: formData.siblingName ? formData.siblingName.trim() : null,
+            sibling_registration_number: formData.siblingRegistrationNumber ? formData.siblingRegistrationNumber.trim() : null,
+            sibling_bac_year: formData.siblingBacYear ? formData.siblingBacYear.trim() : null,
             email: fullEmail,
             pdf_file_path: pdfFilePath,
             pdf_file_name: pdfFileName,
@@ -414,7 +420,11 @@ export default function App() {
     }
     if (formData.requestDomain === 'تغيير الإقامة') {
       if (!formData.transferReason) return false;
-      if (formData.transferReason === 'أخوة' && (formData.siblingName.trim().length < 3 || !isArabicOnly(formData.siblingName))) return false;
+      if (formData.transferReason === 'أخوة') {
+        if (formData.siblingName.trim().length < 3 || !isArabicOnly(formData.siblingName)) return false;
+        if (!formData.siblingBacYear) return false;
+        if (formData.siblingRegistrationNumber.trim().length < 8 || !hasNoArabicCharacters(formData.siblingRegistrationNumber)) return false;
+      }
       if (formData.transferReason !== 'أخوة' && !formData.fileUploaded) return false;
     }
     if (formData.emailPrefix.trim().length < 3 || !hasNoArabicCharacters(formData.emailPrefix)) return false;
@@ -806,25 +816,74 @@ export default function App() {
 
                     <div className="pt-4 border-t border-slate-200/60 space-y-6">
                       
-                      {/* For Sibling Transfer - text input instead of file */}
+                      {/* For Sibling Transfer - text input, bac year, and registration number */}
                       {formData.requestDomain === 'تغيير الإقامة' && formData.transferReason === 'أخوة' && (
-                        <div>
-                          <div className="flex items-center gap-2 mb-2">
-                            <label className="block text-sm font-semibold text-slate-700">اسم ولقب الأخ أو الأخت (الطالب المستضيف)</label>
-                            <ValidIndicator isValid={formData.siblingName.trim().length >= 3 && isArabicOnly(formData.siblingName)} />
+                        <div className="bg-slate-50/80 p-5 md:p-6 rounded-2xl border border-slate-200/90 space-y-5">
+                          <div className="flex items-center gap-2 pb-3 border-b border-slate-200/60">
+                            <Users className="text-emerald-600 shrink-0" size={20} />
+                            <div>
+                              <h4 className="text-sm font-bold text-slate-800">بيانات الأخ أو الأخت (الطالب المستضيف)</h4>
+                              <p className="text-xs text-slate-500">يرجى إدخال بيانات الأخ/الأخت المقيم حالياً بالإقامة المراد الانتقال إليها للتأكد من السجلات</p>
+                            </div>
                           </div>
-                          <input 
-                            type="text" 
-                            placeholder="الاسم الكامل للأخ أو الأخت" 
-                            value={formData.siblingName}
-                            onChange={(e) => updateForm('siblingName', e.target.value)}
-                            className={`w-full bg-white border rounded-xl px-5 py-3.5 text-slate-800 focus:outline-none focus:ring-2 transition-all ${formData.siblingName.length > 0 && !isArabicOnly(formData.siblingName) ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-emerald-500'}`}
-                          />
-                          <ErrorText message={formData.siblingName.length > 0 && !isArabicOnly(formData.siblingName) && 'الرجاء إدخال حروف عربية فقط'} />
-                          <div className="mt-3 flex items-start gap-2 bg-blue-50/70 p-3 rounded-xl border border-blue-100/50">
-                            <Info size={16} className="text-blue-500 shrink-0 mt-0.5" />
-                            <p className="text-xs text-blue-700 font-medium leading-relaxed">
-                              يكفي كتابة اسم الأخ أو الأخت الذي ترغب في الانتقال للإقامة معه للتأكد من السجلات.
+
+                          {/* Sibling Full Name */}
+                          <div>
+                            <div className="flex items-center gap-2 mb-2">
+                              <label className="block text-sm font-semibold text-slate-700">اسم ولقب الأخ أو الأخت (بالعربية)</label>
+                              <ValidIndicator isValid={formData.siblingName.trim().length >= 3 && isArabicOnly(formData.siblingName)} />
+                            </div>
+                            <input 
+                              type="text" 
+                              placeholder="مثال: بن عيسى محمد" 
+                              value={formData.siblingName}
+                              onChange={(e) => updateForm('siblingName', e.target.value)}
+                              className={`w-full bg-white border rounded-xl px-5 py-3.5 text-slate-800 focus:outline-none focus:ring-2 transition-all ${formData.siblingName.length > 0 && !isArabicOnly(formData.siblingName) ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-emerald-500'}`}
+                            />
+                            <ErrorText message={formData.siblingName.length > 0 && !isArabicOnly(formData.siblingName) && 'الرجاء إدخال حروف عربية فقط'} />
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {/* Sibling BAC Year */}
+                            <div>
+                              <div className="flex items-center gap-2 mb-2">
+                                <label className="block text-sm font-semibold text-slate-700">سنة بكالوريا الأخ أو الأخت</label>
+                                <ValidIndicator isValid={formData.siblingBacYear !== ''} />
+                              </div>
+                              <select 
+                                value={formData.siblingBacYear}
+                                onChange={(e) => updateForm('siblingBacYear', e.target.value)}
+                                className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all appearance-none text-sm font-medium"
+                                style={{ backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`, backgroundPosition: 'left 1rem center', backgroundRepeat: 'no-repeat', backgroundSize: '1.2em 1.2em', paddingLeft: '2.5rem' }}
+                              >
+                                <option value="" disabled>اختر سنة البكالوريا...</option>
+                                {BAC_YEARS.map(year => <option key={year} value={year}>{year}</option>)}
+                              </select>
+                            </div>
+
+                            {/* Sibling Registration Number */}
+                            <div>
+                              <div className="flex items-center gap-2 mb-2">
+                                <label className="block text-sm font-semibold text-slate-700">رقم تسجيل البكالوريا (الماتريكيل)</label>
+                                <ValidIndicator isValid={formData.siblingRegistrationNumber.trim().length >= 8 && hasNoArabicCharacters(formData.siblingRegistrationNumber)} />
+                              </div>
+                              <input 
+                                type="text" 
+                                dir="ltr" 
+                                placeholder="مثال: 38012345" 
+                                value={formData.siblingRegistrationNumber}
+                                onChange={(e) => updateForm('siblingRegistrationNumber', e.target.value)}
+                                className={`w-full bg-white border rounded-xl px-5 py-3.5 text-slate-800 font-mono text-left focus:outline-none focus:ring-2 transition-all ${formData.siblingRegistrationNumber.length > 0 && !hasNoArabicCharacters(formData.siblingRegistrationNumber) ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-emerald-500'}`}
+                              />
+                              <ErrorText message={formData.siblingRegistrationNumber.length > 0 && !hasNoArabicCharacters(formData.siblingRegistrationNumber) && 'الرجاء إدخال أرقام وحروف لاتينية فقط'} />
+                              <ErrorText message={formData.siblingRegistrationNumber.length > 0 && hasNoArabicCharacters(formData.siblingRegistrationNumber) && formData.siblingRegistrationNumber.trim().length < 8 && 'يجب أن يتكون رقم التسجيل من 8 أرقام أو حروف على الأقل'} />
+                            </div>
+                          </div>
+
+                          <div className="flex items-start gap-2 bg-blue-50/80 p-3.5 rounded-xl border border-blue-200/60">
+                            <Info size={16} className="text-blue-600 shrink-0 mt-0.5" />
+                            <p className="text-xs text-blue-800 font-medium leading-relaxed">
+                              تُستخدم هذه البيانات للتحقق من سجلات الإيواء الحالية للأخ أو الأخت ومطابقة الغرفة للم شمل الإخوة بنفس الإقامة.
                             </p>
                           </div>
                         </div>

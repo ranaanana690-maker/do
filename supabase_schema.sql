@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS public.housing_requests (
     housing_doc_type TEXT,
     transfer_reason TEXT,
     sibling_name TEXT,
+    sibling_registration_number TEXT,
+    sibling_bac_year TEXT,
     email TEXT NOT NULL,
     pdf_file_path TEXT,
     pdf_file_name TEXT,
@@ -32,6 +34,9 @@ CREATE TABLE IF NOT EXISTS public.housing_requests (
 );
 
 -- إضافة الأعمدة إلى الجدول إن كان موجوداً مسبقاً (Migration)
+ALTER TABLE public.housing_requests ADD COLUMN IF NOT EXISTS sibling_name TEXT DEFAULT NULL;
+ALTER TABLE public.housing_requests ADD COLUMN IF NOT EXISTS sibling_registration_number TEXT DEFAULT NULL;
+ALTER TABLE public.housing_requests ADD COLUMN IF NOT EXISTS sibling_bac_year TEXT DEFAULT NULL;
 ALTER TABLE public.housing_requests ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ DEFAULT NULL;
 ALTER TABLE public.housing_requests ADD COLUMN IF NOT EXISTS file_deleted BOOLEAN DEFAULT FALSE;
 ALTER TABLE public.housing_requests ADD COLUMN IF NOT EXISTS file_deleted_at TIMESTAMPTZ DEFAULT NULL;

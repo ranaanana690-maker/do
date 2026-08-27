@@ -21,6 +21,8 @@ export interface HousingRequestRecord {
   housing_doc_type: string | null;
   transfer_reason: string | null;
   sibling_name: string | null;
+  sibling_registration_number?: string | null;
+  sibling_bac_year?: string | null;
   email: string;
   pdf_file_path: string;
   pdf_file_name: string;
@@ -281,10 +283,37 @@ export const RequestDetailsModal: React.FC<RequestDetailsModalProps> = ({
                     </div>
                   )}
 
-                  {request.sibling_name && (
+                  {request.sibling_name && request.transfer_reason !== 'أخوة' && (
                     <div>
                       <span className="text-slate-500 block">اسم الشقيق(ة) للم شمل الإخوة:</span>
                       <span className="font-bold text-slate-800 mt-0.5 block">{request.sibling_name}</span>
+                    </div>
+                  )}
+
+                  {request.transfer_reason === 'أخوة' && (request.sibling_name || request.sibling_registration_number || request.sibling_bac_year) && (
+                    <div className="col-span-1 md:col-span-2 bg-slate-50 p-4 rounded-2xl border border-slate-200/80 space-y-3">
+                      <div className="flex items-center gap-2 text-emerald-800 font-bold text-xs pb-2 border-b border-slate-200/60">
+                        <Users size={16} className="text-emerald-600" />
+                        <span>بيانات الأخ أو الأخت (الطالب المستضيف لم شمل الإخوة):</span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                        <div>
+                          <span className="text-slate-500 block">اسم ولقب الأخ أو الأخت:</span>
+                          <span className="font-bold text-slate-900 mt-0.5 block text-sm">{request.sibling_name || '-'}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block">سنة البكالوريا للأخ/الأخت:</span>
+                          <span className="font-bold text-slate-900 mt-0.5 block font-mono bg-white px-2.5 py-1 rounded-lg border border-slate-200/70 inline-block">
+                            {request.sibling_bac_year ? `دفعة ${request.sibling_bac_year}` : '-'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block">رقم تسجيل البكالوريا (الماتريكيل):</span>
+                          <span className="font-bold text-emerald-800 mt-0.5 block font-mono bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/80 inline-block">
+                            {request.sibling_registration_number || '-'}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>

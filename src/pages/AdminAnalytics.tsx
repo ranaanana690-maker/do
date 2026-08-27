@@ -23,6 +23,8 @@ interface HousingRequestRecord {
   housing_doc_type: string | null;
   transfer_reason: string | null;
   sibling_name: string | null;
+  sibling_registration_number?: string | null;
+  sibling_bac_year?: string | null;
   email: string;
   pdf_file_path: string;
   pdf_file_name: string;
