@@ -584,11 +584,11 @@ export default function App() {
           <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.2, type: 'spring', bounce: 0.6 }} className="w-24 h-24 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-6 relative z-10 shadow-inner">
             <CheckCircle2 size={48} strokeWidth={2.5} />
           </motion.div>
-          <h2 className="text-3xl font-extrabold text-slate-800 mb-3 relative z-10 tracking-tight">
-            {formData.firstName ? `اكتملت خطوتك الأولى يا ${formData.firstName}!` : 'لقد تم إرسال التسجيل بنجاح!'}
+          <h2 className="text-2xl md:text-3xl font-extrabold text-slate-800 mb-3 relative z-10 tracking-tight">
+            {formData.firstName ? `اكتملت خطوتك الأولى بنجاح يا ${formData.firstName}!` : 'اكتملت خطوتك الأولى بنجاح!'}
           </h2>
-          <p className="text-slate-600 mb-6 leading-relaxed relative z-10">
-            لقد تم إرسال ملفك في النظام بأمان. سيتم مراسلتك عبر البريد الإلكتروني <strong className="font-mono text-emerald-700">{formData.emailPrefix}@gmail.com</strong> خلال 24 ساعة لتأكيد الطلب.
+          <p className="text-slate-600 mb-6 leading-relaxed relative z-10 text-sm md:text-base">
+            لقد تم استلام ملفك وتسجيله في النظام بأمان. سيتم مراسلتك عبر بريدك الإلكتروني (<strong className="font-mono text-emerald-700">{formData.emailPrefix}@gmail.com</strong>) فور الانتهاء من دراسة ومعالجة طلبك.
           </p>
           <div className="bg-white/80 backdrop-blur-sm p-5 rounded-2xl border border-slate-100 shadow-sm text-sm text-slate-700 space-y-3 mb-6 text-start relative z-10">
             <div className="flex justify-between border-b border-slate-100 pb-3">
@@ -607,8 +607,8 @@ export default function App() {
             </div>
           </div>
           
-          <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl text-amber-800 text-sm font-medium relative z-10 mb-6 text-right">
-            <strong>ملاحظة:</strong> يرجى عدم إعادة التسجيل مرة ثانية إلا بعد انقضاء 24 ساعة دون تلقي رسالة التأكيد على البريد الإلكتروني.
+          <div className="bg-amber-50/90 border border-amber-200/90 p-4 rounded-2xl text-amber-900 text-xs md:text-sm font-medium relative z-10 mb-6 text-right leading-relaxed">
+            <strong className="font-bold text-amber-950">ملاحظة هامة:</strong> يرجى عدم إعادة التسجيل مرة ثانية لتفادي تكرار الملفات. طلبك الآن قيد الانتظار، وسنعلمك بالنتيجة بمجرد الانتهاء من معالجته.
           </div>
 
           <button onClick={() => window.location.reload()} className="text-emerald-600 font-bold hover:text-emerald-700 transition-colors relative z-10 px-6 py-2 rounded-full hover:bg-emerald-50 cursor-pointer">
